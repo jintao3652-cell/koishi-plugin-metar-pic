@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" enable-background="new" version="1.1" viewBox="0 0 299.2 299.2">
+ <defs>
+  <filter id="filter2127" x="-.00055999" y="-.00052769" width="1.0179" height="1.0169" color-interpolation-filters="sRGB">
+   <feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/>
+   <feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/>
+   <feGaussianBlur in="composite1" result="blur" stdDeviation="0.0013910235"/>
+   <feOffset dx="0.1" dy="0.1" result="offset"/>
+   <feComposite in="SourceGraphic" in2="offset" result="composite2"/>
+  </filter>
+  <filter id="filter2115" x="-.1403" y="-.13221" width="1.3098" height="1.292" color-interpolation-filters="sRGB">
+   <feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/>
+   <feComposite in="flood" in2="SourceGraphic" operator="out" result="composite1"/>
+   <feGaussianBlur in="composite1" result="blur" stdDeviation="0.2"/>
+   <feOffset dx="0.1" dy="0.1" result="offset"/>
+   <feComposite in="offset" in2="SourceGraphic" operator="atop" result="composite2"/>
+  </filter>
+  <filter id="filter1350" x="-.21917" y="-.024537" width="1.4916" height="1.055" color-interpolation-filters="sRGB">
+   <feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/>
+   <feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/>
+   <feGaussianBlur in="composite1" result="blur" stdDeviation="1.2"/>
+   <feOffset dx="0.7" dy="0.7" result="offset"/>
+   <feComposite in="SourceGraphic" in2="offset" result="composite2"/>
+  </filter>
+  <filter id="filter1362" x="-.14724" y="-.061731" width="1.3303" height="1.1385" color-interpolation-filters="sRGB">
+   <feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/>
+   <feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/>
+   <feGaussianBlur in="composite1" result="blur" stdDeviation="1.2"/>
+   <feOffset dx="0.7" dy="0.7" result="offset"/>
+   <feComposite in="SourceGraphic" in2="offset" result="composite2"/>
+  </filter>
+ </defs>
+ <path d="m143.07 147.7 0.15234 99.02 6.543 18.352 6.4453-18.385-0.13476-98.986z" fill="#fff" filter="url(#filter1350)"/>
+ <path d="m149.51 101.24a9.7799 9.7799 0 0 0-9.6699 9.7793 9.7799 9.7799 0 0 0 3.4219 7.4316v29.443h12.691l0.084-29.494a9.7799 9.7799 0 0 0 3.3633-7.3809 9.7799 9.7799 0 0 0-9.7793-9.7793 9.7799 9.7799 0 0 0-0.11133 0z" fill="#262626" filter="url(#filter1362)"/>
+ <text x="-247.21579" y="119.75312" fill="#ffffff" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="19.863px" font-weight="300" letter-spacing="0px" stroke-width="2.4828" word-spacing="0px" style="line-height:1.25" xml:space="preserve"><tspan x="-247.21579" y="138.13974" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="13.242px" font-weight="300" stroke-width="2.4828" style="line-height:0"/></text>
+ <g transform="translate(-446.92 140.23)" opacity=".99">
+  <text x="13.86202" y="253.8631" fill="#000000" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="5.3333px" font-weight="300" letter-spacing="0px" word-spacing="0px" style="line-height:1.25" xml:space="preserve"><tspan x="13.86202" y="258.80008"/></text>
+ </g>
+ <ellipse transform="matrix(-3.1841 .0099951 -.0099951 -3.1841 414.71 466.99)" cx="82.948" cy="99.94" rx="2.9808" ry="3.1633" enable-background="new" fill="#262626" filter="url(#filter2127)"/>
+ <ellipse transform="matrix(-3.1841 .0099951 -.0099951 -3.1841 414.71 466.99)" cx="82.948" cy="99.94" rx="1.7106" ry="1.8153" enable-background="new" fill="#262626" filter="url(#filter2115)"/>
+</svg>

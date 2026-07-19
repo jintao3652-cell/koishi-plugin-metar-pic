@@ -1,8 +1,10 @@
 import { Context, Schema, h } from 'koishi';
 import { } from 'koishi-plugin-puppeteer';
 import axios from 'axios';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
-// 类型定义
+// 绫诲瀷��氫箄1�7
 export interface AirportInfo {
   longitudeDeg: number;
   elevationFt: number;
@@ -78,30 +80,30 @@ export interface Config {
   consoleinfo: boolean;
   pageautoclose: boolean;
   apihub_token: string;
-  primarySource: 'xflysim' | 'etops' | 'xbzglw'; // 新增主气象源选择
+  primarySource: 'xflysim' | 'etops' | 'xbzglw'; // 鏂板涓绘皵璞℃簮閫夋嫨
 }
 
 export const Config = Schema.intersect([
   Schema.object({
-    commandname: Schema.string().default("metar").description("注册的指令名称"),
-    commandalias: Schema.string().default("气象").description("注册的指令别名"),
-  }).description('基础设置'),
+    commandname: Schema.string().default("metar").description("娉ㄥ唽鐨勬寚浠ゅ悕绉"),
+    commandalias: Schema.string().default("姘旇薄1�7").description("娉ㄥ唽鐨勬寚浠ゅ埆鍚"),
+  }).description('鍩虹璁剧疆'),
 
   Schema.object({
     outputMode: Schema.union([
-      Schema.const('text').description('仅文字输出'),
-      Schema.const('image').description('仅图片输出'),
-      Schema.const('both').description('图片和文字一起输出'),
-    ]).default('text').description('输出格式选择'),
-  }).description('输出设置'),
+      Schema.const('text', '浠呮枃��楄緭鍑?'),
+      Schema.const('image', '浠呭浘鐗囪緭鍄1�7?'),
+      Schema.const('both', '鍥剧墖鍜屾枃瀛椾竴璧疯緭鍄1�7?'),
+    ]).default('text').description('杈撳嚭鏍煎紡閫夋嫄1�7'),
+  }).description('杈撳嚭璁剧疆'),
 
   Schema.object({
     imageMode: Schema.union([
-      Schema.const('auto').description('自动截图对应大小的元素'),
-      Schema.const('manual').description('手动指定渲染大小'),
-    ]).description('渲染模式选择').default("auto"),
-    screenshotquality: Schema.number().default(80).min(30).max(100).role('slider').description('渲染质量（%）'),
-  }).description('渲染设置'),
+      Schema.const('auto').description('鑷姩鎴浘瀵瑰簲澶у皬鐨勫厓组1�7?),
+      Schema.const('manual').description('鎵嬪姩鎸囧畾娓叉煋澶у的1�7'),
+    ]).description('娓叉煋妯″紡閫夋嫄1�7').default("auto"),
+    screenshotquality: Schema.number().default(80).min(30).max(100).role('slider').description('娓叉煋璐ㄩ噺锄1�7?锄1�7?),
+  }).description('娓叉煋璁剧疆'),
 
   Schema.union([
     Schema.object({
@@ -109,8 +111,8 @@ export const Config = Schema.intersect([
     }),
     Schema.object({
       imageMode: Schema.const("manual").required(),
-      imageWidth: Schema.number().default(1600).description('生成图片的宽度'),
-      imageHeight: Schema.number().default(900).description('生成图片的高度'),
+      imageWidth: Schema.number().default(1600).description('鐢熸垚鍥剧墖鐨勫搴?),
+      imageHeight: Schema.number().default(900).description('鐢熸垚鍥剧墖鐨勯珮搴?),
     }),
   ]),
 
@@ -119,170 +121,76 @@ export const Config = Schema.intersect([
       Schema.const('xflysim').description('XFLYSIM'),
       Schema.const('etops').description('ETOPS'),
       Schema.const('xbzglw').description('XBZGLW'),
-    ]).default('xflysim').description('首选气象数据源'),
-  }).description('数据源设置'),
+    ]).default('etops').description('棣栭€夋皵璞℃暟鎹簄1�7'),
+  }).description('鏁版嵁婧愯缄1�7?),
 
   Schema.object({
     weatherMap: Schema.array(Schema.object({
-      code: Schema.string().required().description('天气代码'),
-      description: Schema.string().required().description('天气描述'),
+      code: Schema.string().required().description('澶╂皵浠ｇ爜'),
+      description: Schema.string().required().description('澶╂皵鎻忚堪'),
     })).role('table').default([
-      { code: 'BR', description: '雾' },
-      { code: 'FG', description: '雾或薄雾' },
-      { code: 'HZ', description: '霾' },
-      { code: 'FU', description: '烟雾' },
-      { code: 'VA', description: '火山灰' },
-      { code: 'DU', description: '沙尘' },
-      { code: 'SA', description: '沙' },
-      { code: 'SS', description: '尘暴' },
-      { code: 'DS', description: '风沙' },
-      { code: 'SG', description: '雪粒' },
-      { code: 'IC', description: '冰晶' },
-      { code: 'PL', description: '霰' },
-      { code: 'GR', description: '冰雹' },
-      { code: 'GS', description: '小冰雹' },
-      { code: 'UP', description: '未知降水' },
-      { code: 'RA', description: '雨' },
-      { code: 'DZ', description: '毛毛雨' },
-      { code: 'SN', description: '雪' },
-      { code: 'SQ', description: '飑线' },
-      { code: 'FC', description: '风暴' },
-      { code: 'TS', description: '雷暴' },
-      { code: 'MI', description: '微型沙尘暴' },
-      { code: 'PR', description: '部分地区' },
-      { code: 'BC', description: '局部' },
-      { code: 'DR', description: '吹动的尘土或雪花' },
-      { code: 'BL', description: '风暴' },
-      { code: 'SH', description: '阵性降水' },
-      { code: '+', description: '大' },
-      { code: '-', description: '小' },
-      { code: 'VCTS', description: '附近有雷暴' },
-      { code: 'VCSH', description: '附近有阵性降水' },
-      { code: 'VCFG', description: '附近有雾' },
-    ]).description('天气现象映射表'),
+      { code: 'BR', description: '闄1�7? },
+      { code: 'FG', description: '闆炬垨钖勯浘' },
+      { code: 'HZ', description: '闄1�7? },
+      { code: 'FU', description: '鐑熼浄1�7' },
+      { code: 'VA', description: '鐏北鐏? },
+      { code: 'DU', description: '娌欏的1�7' },
+      { code: 'SA', description: '娄1�7? },
+      { code: 'SS', description: '灏樻毄1�7' },
+      { code: 'DS', description: '椋庢矄1�7' },
+      { code: 'SG', description: '闆矄1�7' },
+      { code: 'IC', description: '鍐版櫄1�7' },
+      { code: 'PL', description: '闄1�7? },
+      { code: 'GR', description: '鍐伴浄1�7' },
+      { code: 'GS', description: '灏忓啺闆? },
+      { code: 'UP', description: '鏈煡闄嶆按' },
+      { code: 'RA', description: '闄1�7? },
+      { code: 'DZ', description: '姣涙瘺闆? },
+      { code: 'SN', description: '闄1�7? },
+      { code: 'SQ', description: '椋戠嚄1�7' },
+      { code: 'FC', description: '椋庢毄1�7' },
+      { code: 'TS', description: '闆锋毄1�7' },
+      { code: 'MI', description: '寰瀷娌欏皹鏄1�7? },
+      { code: 'PR', description: '閮ㄥ垎鍦板尯' },
+      { code: 'BC', description: '灞€閄1�7? },
+      { code: 'DR', description: '鍚瑰姩鐨勫皹鍦熸垨闆姳' },
+      { code: 'BL', description: '椋庢毄1�7' },
+      { code: 'SH', description: '闃垫€ч檷姄1�7? },
+      { code: '+', description: '澄1�7? },
+      { code: '-', description: '灄1�7? },
+      { code: 'VCTS', description: '闄勮繎鏈夐浄鏄1�7? },
+      { code: 'VCSH', description: '闄勮繎鏈夐樀鎬ч檷姄1�7? },
+      { code: 'VCFG', description: '闄勮繎鏈夐浘' },
+    ]).description('澶╂皵鐜拌薄鏄犲皠琛?),
     cloudCoverageMap: Schema.array(Schema.object({
-      code: Schema.string().required().description('云层代码'),
-      description: Schema.string().required().description('云层描述'),
+      code: Schema.string().required().description('浜戝眰浠ｇ爜'),
+      description: Schema.string().required().description('浜戝眰鎻忚堪'),
     })).role('table').default([
-      { code: 'FEW', description: '少云 (1/8 - 2/8)' },
-      { code: 'SCT', description: '疏云 (3/8 - 4/8)' },
-      { code: 'BKN', description: '多云 (5/8 - 7/8)' },
-      { code: 'OVC', description: '满天云 (8/8)' },
-      { code: 'NSC', description: '无显著云层' },
-      { code: 'SKC', description: '晴空' },
-      { code: 'CLR', description: '晴朗' },
-      { code: 'VV', description: '垂直能见度' },
-    ]).description('云层覆盖映射表'),
-  }).description('映射表设置'),
+      { code: 'FEW', description: '灏戜簄1�7 (1/8 - 2/8)' },
+      { code: 'SCT', description: '鐤忎簄1�7 (3/8 - 4/8)' },
+      { code: 'BKN', description: '澶氫簄1�7 (5/8 - 7/8)' },
+      { code: 'OVC', description: '婊��ぉ浄1�7?(8/8)' },
+      { code: 'NSC', description: '鏃犳樉钁椾簯灄1�7? },
+      { code: 'SKC', description: '鏅寸┄1�7' },
+      { code: 'CLR', description: '鏅存湄1�7' },
+      { code: 'VV', description: '鍨傜洿鑳借搄1�7? },
+    ]).description('浜戝眰瑕嗙洊鏄犲皠琛?),
+  }).description('鏄犲皠琛ㄨ缄1�7?),
 
   Schema.object({
-    apihub_token: Schema.string().description('APIHUB Token（用于获取日出日落时间）').required(),
-  }).description('API设置'),
+    apihub_token: Schema.string().description('APIHUB Token锛堢敤浜庤幏鍙栨棩鍑烘棩钢�芥椂闂达約1�7').required(),
+  }).description('API璁剧疄1�7'),
 
   Schema.object({
-    consoleinfo: Schema.boolean().default(false).description('日志调试模式'),
-    pageautoclose: Schema.boolean().default(true).description('自动page关闭'),
-  }).description('开发者选项'),
+    consoleinfo: Schema.boolean().default(false).description('鏃ュ織璋冭瘯妯��紡'),
+    pageautoclose: Schema.boolean().default(true).description('鑷姩page鍏抽棄1�7'),
+  }).description('寮€鍙戣€呴€夐〄1�7'),
 ]);
 
 export const name = 'metar-weather';
 export const inject = ['puppeteer'];
 
-type FlightRules = 'VFR' | 'MVFR' | 'IFR' | 'LIFR';
-type RunwayWindComponent = {
-  runway: RunwayInfo;
-  components: {
-    headwind: number;
-    crosswind: number;
-  };
-};
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function getWindSpeedInKnots(parsedMETAR: Pick<ParsedMETAR, 'windSpeed' | 'windUnit'>): number {
-  const rawSpeed = parseInt(parsedMETAR.windSpeed) || 0;
-  if (parsedMETAR.windUnit === 'MPS') {
-    return Math.round(rawSpeed * 1.94384);
-  }
-  return rawSpeed;
-}
-
-function formatVisibilityDisplay(visibility: string): string {
-  if (!visibility) return 'N/A';
-  const meters = parseInt(visibility);
-  if (!Number.isFinite(meters)) return visibility;
-  if (meters >= 9999) return '10km+';
-  return `${meters} m`;
-}
-
-function formatAirportDisplayName(icao: string, airportInfo: AirportInfo | null): string {
-  if (!airportInfo) return `${icao} Airport`;
-
-  const cnName = airportInfo.cnName?.trim();
-  const enName = airportInfo.enName?.trim();
-
-  if (cnName && enName && cnName !== enName) {
-    return `${cnName} (${enName})`;
-  }
-
-  return cnName || enName || `${icao} Airport`;
-}
-
-function stripReportPrefix(report: string, prefix: 'METAR' | 'TAF'): string {
-  return report.replace(new RegExp(`^${prefix}\\s+`, 'i'), '').trim();
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function getCountryDisplayName(airportInfo: AirportInfo | null, icao: string): string {
-  const isoCountry = airportInfo?.isoCountry?.toUpperCase();
-  if (isoCountry === 'CN' || icao.startsWith('Z')) return '中国';
-  if (isoCountry === 'US' || icao.startsWith('K')) return '美国';
-  return isoCountry || 'Unknown';
-}
-
-function getObservationTimestamp(parsedMETAR: ParsedMETAR): string {
-  if (!parsedMETAR.time || parsedMETAR.time.length !== 6) return '刚刚';
-  const day = parsedMETAR.time.slice(0, 2);
-  const hour = parsedMETAR.time.slice(2, 4);
-  const minute = parsedMETAR.time.slice(4, 6);
-  return `${day}日 ${hour}:${minute}Z`;
-}
-
-function getAirportLocationText(airportInfo: AirportInfo | null, countryName: string): string {
-  const locality = airportInfo?.municipalityCn?.trim() || airportInfo?.municipality?.trim() || airportInfo?.isoRegion?.trim() || '';
-  return [locality, countryName].filter(Boolean).join(' · ') || countryName;
-}
-
-function getCloudSummaryText(clouds: ParsedMETAR['clouds'], config: Config): string {
-  if (!clouds.length) {
-    return config.cloudCoverageMap.find(item => item.code === 'NSC')?.description || '无显著云层';
-  }
-
-  return clouds.map(cloud => {
-    const description = config.cloudCoverageMap.find(item => item.code === cloud.type)?.description || cloud.type;
-    if (cloud.type === 'NSC' || cloud.type === 'SKC' || cloud.type === 'CLR') {
-      return description;
-    }
-    return `${description} ${cloud.height} ft`;
-  }).join('，');
-}
-
-function getAirportRunwayCount(runways: RunwayInfo[]): number {
-  return new Set(runways.map(runway => `${runway.leIdent}/${runway.heIdent}`)).size;
-}
-
-// API配置
+// API閰嶇疄1�7
 interface APISource {
   name: string;
   metarUrl: (icao: string) => string;
@@ -351,7 +259,7 @@ const API_SOURCES: { [key: string]: APISource } = {
   }
 };
 
-// 日出日落服务
+// 鏃ュ嚭鏃ヨ惤鏈嶅姄1�7
 class SunTimeService {
   static async getSunTimes(lat: number, lon: number, config: Config): Promise<SunTimes | null> {
     try {
@@ -381,139 +289,40 @@ class SunTimeService {
         };
       }
     } catch (error) {
-      console.error('获取日出日落时间失败:', error);
+      console.error('鑾峰彇鏃ュ嚭鏃ヨ惤鏃堕棿澶辫规1�7:', error);
     }
     return null;
   }
 }
 
-// 机场信息服务
+// 鏈哄溢�淇℃伅鏈嶅姟
 class AirportService {
   static async getAirportInfo(icao: string): Promise<AirportInfo | null> {
     try {
-      const response = await axios.get(`https://api.xflysim.com/pilot/api/realTimeMap/airports/${icao.toLowerCase()}`, { timeout: 10000 });
+      const response = await axios.get(`https://api.xflysim.com/pilot/api/realTimeMap/airports/${icao.toLowerCase()}`);
       if (response.data.code === 20000) {
         return response.data.data;
       }
     } catch (error) {
-      console.error('获取机场信息失败:', getErrorMessage(error));
-    }
-
-    try {
-      const response = await axios.get(`https://aviationweather.gov/api/data/stationinfo?ids=${icao.toUpperCase()}&format=json`, { timeout: 10000 });
-      if (Array.isArray(response.data) && response.data.length > 0) {
-        return AirportService.mapStationInfoToAirportInfo(response.data[0], icao);
-      }
-    } catch (error) {
-      console.error('获取航威站点信息失败:', getErrorMessage(error));
-    }
-
-    try {
-      const response = await axios.get(`https://aviationweather.gov/api/data/airport?ids=${icao.toUpperCase()}&format=json`, { timeout: 10000 });
-      if (Array.isArray(response.data) && response.data.length > 0) {
-        return AirportService.mapAirportApiToAirportInfo(response.data[0], icao);
-      }
-    } catch (error) {
-      console.error('获取航威机场信息失败:', getErrorMessage(error));
+      console.error('鑾峰彇鏈哄満淇℃伅澶辫触:', error);
     }
     return null;
   }
 
   static async getRunways(icao: string): Promise<RunwayInfo[]> {
     try {
-      const response = await axios.get(`https://api.xflysim.com/pilot/api/realTimeMap/runway/${icao.toLowerCase()}`, { timeout: 10000 });
+      const response = await axios.get(`https://api.xflysim.com/pilot/api/realTimeMap/runway/${icao.toLowerCase()}`);
       if (response.data.code === 20000) {
         return response.data.data;
       }
     } catch (error) {
-      console.error('获取跑道信息失败:', getErrorMessage(error));
-    }
-
-    try {
-      const response = await axios.get(`https://aviationweather.gov/api/data/airport?ids=${icao.toUpperCase()}&format=json`, { timeout: 10000 });
-      if (Array.isArray(response.data) && response.data.length > 0) {
-        return AirportService.mapAirportApiToRunways(response.data[0], icao);
-      }
-    } catch (error) {
-      console.error('获取航威跑道信息失败:', getErrorMessage(error));
+      console.error('鑾峰彇璺戦亾淇℃伅澶辫触:', error);
     }
     return [];
   }
-
-  private static mapStationInfoToAirportInfo(data: any, icao: string): AirportInfo {
-    const site = data.site || data.name || `${icao} Airport`;
-    return {
-      longitudeDeg: Number(data.lon) || 0,
-      elevationFt: Number(data.elev) || 0,
-      continent: '',
-      isoRegion: data.state || '',
-      gpsCode: data.icaoId || data.id || icao,
-      ident: data.icaoId || data.id || icao,
-      municipality: data.state || '',
-      type: 'airport',
-      latitudeDeg: Number(data.lat) || 0,
-      municipalityCn: data.state || '',
-      iataCode: data.iataId || '',
-      cnName: site,
-      enName: site,
-      isoCountry: data.country || '',
-    };
-  }
-
-  private static mapAirportApiToAirportInfo(data: any, icao: string): AirportInfo {
-    const site = data.name || `${icao} Airport`;
-    return {
-      longitudeDeg: Number(data.lon) || 0,
-      elevationFt: Number(data.elev) || 0,
-      continent: '',
-      isoRegion: data.state || '',
-      gpsCode: data.icaoId || icao,
-      ident: data.icaoId || icao,
-      municipality: data.state || '',
-      type: data.type || 'airport',
-      latitudeDeg: Number(data.lat) || 0,
-      municipalityCn: data.state || '',
-      iataCode: data.iataId || '',
-      cnName: site,
-      enName: site,
-      isoCountry: data.country || '',
-    };
-  }
-
-  private static mapAirportApiToRunways(data: any, icao: string): RunwayInfo[] {
-    if (!Array.isArray(data?.runways)) return [];
-
-    return data.runways.map((runway: any, index: number) => {
-      const [lengthFt, widthFt] = String(runway.dimension || '').split('x').map((value: string) => parseInt(value) || 0);
-      const [leIdent, heIdent] = String(runway.id || '').split('/');
-      const baseHeading = Number(runway.alignment) || 0;
-      const reciprocalHeading = (baseHeading + 180) % 360;
-
-      return {
-        id: `${icao}-${runway.id || index}`,
-        airportIdent: icao,
-        leIdent: leIdent || `${Math.round(baseHeading / 10)}`,
-        heIdent: heIdent || `${Math.round(reciprocalHeading / 10)}`,
-        leHeadingDegt: String(baseHeading),
-        heHeadingDegt: String(reciprocalHeading),
-        lengthFt,
-        widthFt,
-        surface: runway.surface || '',
-        lighted: 'unknown',
-        closed: 'false',
-        leLatitudeDeg: 0,
-        leLongitudeDeg: 0,
-        heLatitudeDeg: 0,
-        heLongitudeDeg: 0,
-        leElevationFt: String(Number(data.elev) || 0),
-        heElevationFt: String(Number(data.elev) || 0),
-      };
-    });
-  }
 }
 
-// METAR解析服务 - 修复INHG读取和天气代码解析
-class METARParser {
+// METAR瑙ｆ瀽鏈嶅姟 - 淇INHG璇诲彇鍜屽ぉ姘斾唬鐮佽В鏋?class METARParser {
   static parse(metarString: string): ParsedMETAR {
     const parsed: ParsedMETAR = {
       station: '',
@@ -535,19 +344,17 @@ class METARParser {
     if (!metarString) return parsed;
 
     try {
-      // 基本METAR解析
-      const normalizedMetar = metarString.trim().replace(/\s+/g, ' ');
-      const parts = normalizedMetar.split(' ');
-      parsed.station = ['METAR', 'SPECI'].includes(parts[0]) ? (parts[1] || '') : parts[0];
+      // 鍩烘湰METAR瑙ｆ瀄1�7
+      const parts = metarString.split(' ');
+      parsed.station = parts[0];
       
-      // 解析时间 (DDHHMMZ)
-      const timeMatch = normalizedMetar.match(/(\d{6})Z/);
+      // 瑙ｆ瀽鏃堕棿 (DDHHMMZ)
+      const timeMatch = metarString.match(/(\d{6})Z/);
       if (timeMatch) {
         parsed.time = timeMatch[1];
       }
 
-      // 解析风
-      const windMatch = normalizedMetar.match(/(\d{3}|VRB)(\d{2,3})(G(\d{2,3}))?(KT|MPS)/);
+      // 瑙ｆ瀽椋?      const windMatch = metarString.match(/(\d{3}|VRB)(\d{2,3})(G(\d{2,3}))?(KT|MPS)/);
       if (windMatch) {
         parsed.windDirection = windMatch[1];
         parsed.windSpeed = windMatch[2];
@@ -555,53 +362,46 @@ class METARParser {
         parsed.windUnit = windMatch[5];
       }
 
-      // 解析能见度
-      const hasCavok = /\bCAVOK\b/.test(normalizedMetar);
-      if (hasCavok) {
-        parsed.visibility = '9999';
-      } else {
-        const visibilityToken = parts.find(part => /^\d{4}(NDV)?$/.test(part));
-        if (visibilityToken) {
-          parsed.visibility = visibilityToken.slice(0, 4);
-        }
+      // 瑙ｆ瀽鑳借搄1�7?      const visMatch = metarString.match(/(\d{4})(?=\s)/);
+      if (visMatch) {
+        parsed.visibility = visMatch[1];
       }
 
-      // 解析天气现象 - 改进天气代码解析
+      // 瑙ｆ瀽澶╂皵鐜拌薄1�7 - 鏢�硅繘澶╂皵浠ｇ爜瑙ｆ瀄1�7
       const weatherCodes = ['BR', 'FG', 'HZ', 'FU', 'VA', 'DU', 'SA', 'SS', 'DS', 'SG', 'IC', 'PL', 'GR', 'GS', 'UP', 'RA', 'DZ', 'SN', 'SQ', 'FC', 'TS', 'MI', 'PR', 'BC', 'DR', 'BL', 'SH', 'VCTS', 'VCSH', 'VCFG', '\\+', '\\-'];
       const weatherRegex = new RegExp(`\\b(${weatherCodes.join('|')})+\\b`, 'g');
-      const weatherMatches = normalizedMetar.match(weatherRegex);
+      const weatherMatches = metarString.match(weatherRegex);
       if (weatherMatches) {
         parsed.weather = weatherMatches;
       }
 
-      // 解析温度/露点
-      const tempMatch = normalizedMetar.match(/(M?\d{2})\/(M?\d{2})/);
+      // 瑙ｆ瀽娓╁害/闇茬偄1�7
+      const tempMatch = metarString.match(/(M?\d{2})\/(M?\d{2})/);
       if (tempMatch) {
         parsed.temperature = tempMatch[1].replace('M', '-');
         parsed.dewpoint = tempMatch[2].replace('M', '-');
       }
 
-      // 解析气压 - 修复INHG读取问题
-      const pressureMatchQNH = normalizedMetar.match(/Q(\d{4})/);
-      const pressureMatchINHG = normalizedMetar.match(/A(\d{4})/);
+      // 瑙ｆ瀽姘斿帇 - 淇INHG璇诲彇闂�1�7
+      const pressureMatchQNH = metarString.match(/Q(\d{4})/);
+      const pressureMatchINHG = metarString.match(/A(\d{4})/);
       
       if (pressureMatchQNH) {
         parsed.pressure = pressureMatchQNH[1];
         parsed.pressureUnit = 'hPa';
       } else if (pressureMatchINHG) {
-        // 将英寸汞柱转换为百帕显示，同时保留原始值
-        const inhgValue = parseInt(pressureMatchINHG[1]) / 100;
+        // 灏嗚嫳��告睘鏌辫浆鎹负鐧惧笗鏄剧ず锛屽悓鏃朵繚鐣欏師濮嬪₄1�7?        const inhgValue = parseInt(pressureMatchINHG[1]) / 100;
         const hPaValue = Math.round(inhgValue * 33.8639);
         parsed.pressure = `${hPaValue} (${inhgValue.toFixed(2)} INHG)`;
         parsed.pressureUnit = 'INHG';
       }
 
-      // 解析云量 - 改进云层代码解析
+      // 瑙ｆ瀽浜戦噺 - 鏢�硅繘浜戝眰浠ｇ爜瑙ｆ瀄1�7
       const cloudRegex = /(FEW|SCT|BKN|OVC|NSC|SKC|CLR|VV)(\d{3})?/g;
       let cloudMatch;
-      while ((cloudMatch = cloudRegex.exec(normalizedMetar)) !== null) {
+      while ((cloudMatch = cloudRegex.exec(metarString)) !== null) {
         if (cloudMatch[1] === 'NSC' || cloudMatch[1] === 'SKC' || cloudMatch[1] === 'CLR') {
-          // 无云情况
+          // 鏃犱簯鎯呭喌
           parsed.clouds.push({
             type: cloudMatch[1],
             height: '0'
@@ -614,25 +414,16 @@ class METARParser {
         }
       }
 
-      if (hasCavok && parsed.clouds.length === 0) {
-        parsed.clouds.push({
-          type: 'NSC',
-          height: '0'
-        });
-      }
-
     } catch (error) {
-      console.error('METAR解析错误:', getErrorMessage(error));
+      console.error('METAR瑙ｆ瀽閿欒:', error);
     }
 
     return parsed;
   }
 }
 
-// 风分量计算服务
-class WindComponentCalculator {
-  // 计算跑道风分量
-  static calculateWindComponents(windDirection: number, windSpeed: number, runwayHeading: number): { headwind: number; crosswind: number } {
+// 椋庡垎閲忚绠楁湇鍔?class WindComponentCalculator {
+  // 璁＄畻璺戦亾椋庡垎閲?  static calculateWindComponents(windDirection: number, windSpeed: number, runwayHeading: number): { headwind: number; crosswind: number } {
     const angleDiff = Math.abs(windDirection - runwayHeading);
     const angleRad = (angleDiff * Math.PI) / 180;
     
@@ -646,9 +437,9 @@ class WindComponentCalculator {
   }
 }
 
-// 飞行规则判定
+// 椋炶瑙勫垯鍒ゅ畄1�7
 class FlightRulesCalculator {
-  static getFlightRules(parsedMETAR: ParsedMETAR): FlightRules {
+  static getFlightRules(parsedMETAR: ParsedMETAR): string {
     const visibility = parseInt(parsedMETAR.visibility) || 9999;
     const clouds = parsedMETAR.clouds;
     
@@ -662,39 +453,38 @@ class FlightRulesCalculator {
       }
     }
 
-    // VFR条件
+    // VFR鏉��欢
     if (visibility >= 5000 && ceiling >= 1000) {
       return 'VFR';
     }
-    // MVFR条件  
+    // MVFR鏉��欢  
     else if (visibility >= 1500 && ceiling >= 500) {
       return 'MVFR';
     }
-    // IFR条件
+    // IFR鏉��欢
     else if (visibility >= 800 && ceiling >= 200) {
       return 'IFR';
     }
-    // LIFR条件
+    // LIFR鏉��欢
     else {
       return 'LIFR';
     }
   }
 }
 
-// 获取METAR数据的函数实现 - 修改为优先使用主数据源
-async function fetchMETARData(icao: string, config: Config): Promise<{ metar: string; taf: string }> {
+// 鑾峰彇METAR鏁版嵁鐨勫嚱鏁板疄鐜?- 淇敼涓轰紭鍏堜娇鐢ㄤ富鏁版嵁婧?async function fetchMETARData(icao: string, config: Config): Promise<{ metar: string; taf: string }> {
   let metar = '';
   let taf = '';
 
-  // 优先使用主数据源
+  // 浼樺厛浣跨敤涓绘暟鎹簮
   const primarySource = API_SOURCES[config.primarySource];
   const otherSources = Object.values(API_SOURCES).filter(source => source.name !== config.primarySource);
 
-  // 首先尝试主数据源
+  // 棣栧厛灏濊瘯涓绘暟鎹簮
   if (primarySource) {
     try {
       if (config.consoleinfo) {
-        console.log(`优先从主数据源 ${primarySource.name} 获取 ${icao} 的METAR数据`);
+        console.log(`浼樺厛浠庝富鏁版嵁婧?${primarySource.name} 鑾峰彄1�7 ${icao} 鐨凪ETAR鏁版嵁`);
       }
 
       const response = await axios.get(primarySource.metarUrl(icao), { timeout: 10000 });
@@ -705,7 +495,7 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
           metar = parsed.metar;
           taf = parsed.taf;
           
-          // 如果有TAF数据，尝试获取完整的TAF
+          // 濡傛灉鏈塗AF鏁版嵁锛屽皾璇曡幏鍙栧畬鏁寸殑TAF
           if (!taf && primarySource.tafUrl) {
             try {
               const tafResponse = await axios.get(primarySource.tafUrl(icao), { timeout: 10000 });
@@ -714,14 +504,14 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
               }
             } catch (tafError) {
               if (config.consoleinfo) {
-                console.log(`从主数据源 ${primarySource.name} 获取TAF数据失败:`, getErrorMessage(tafError));
+                console.log(`浠庝富鏁版嵁婄1�7?${primarySource.name} 鑾峰彇TAF鏁版嵁澶辫触:`, tafError.message);
               }
             }
           }
 
           if (metar) {
             if (config.consoleinfo) {
-              console.log(`成功从主数据源 ${primarySource.name} 获取METAR数据:`, metar);
+              console.log(`鎴愬姛浠庝富鏁版嵁婧?${primarySource.name} 鑾峰彇METAR鏁版嵄1�7:`, metar);
             }
             return { metar, taf };
           }
@@ -729,16 +519,16 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
       }
     } catch (error) {
       if (config.consoleinfo) {
-        console.log(`从主数据源 ${primarySource.name} 获取数据失败:`, getErrorMessage(error));
+        console.log(`浠庝富鏁版嵁婄1�7?${primarySource.name} 鑾峰彇鏁版嵁澶辫规1�7:`, error.message);
       }
     }
   }
 
-  // 主数据源失败，尝试其他数据源
+  // 涓绘暟鎹簮澶辫触锛屽皾璇曞叾浠栨暟鎹簄1�7
   for (const source of otherSources) {
     try {
       if (config.consoleinfo) {
-        console.log(`尝试从备用数据源 ${source.name} 获取 ${icao} 的METAR数据`);
+        console.log(`灏濊瘯浠庡鐢ㄦ暟鎹簮 ${source.name} 鑾峰彄1�7 ${icao} 鐨凪ETAR鏁版嵁`);
       }
 
       const response = await axios.get(source.metarUrl(icao), { timeout: 10000 });
@@ -749,7 +539,7 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
           metar = parsed.metar;
           taf = parsed.taf;
           
-          // 如果有TAF数据，尝试获取完整的TAF
+          // 濡傛灉鏈塗AF鏁版嵁锛屽皾璇曡幏鍙栧畬鏁寸殑TAF
           if (!taf && source.tafUrl) {
             try {
               const tafResponse = await axios.get(source.tafUrl(icao), { timeout: 10000 });
@@ -758,14 +548,14 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
               }
             } catch (tafError) {
               if (config.consoleinfo) {
-                console.log(`从备用数据源 ${source.name} 获取TAF数据失败:`, getErrorMessage(tafError));
+                console.log(`浠庡鐢ㄦ暟鎹簄1�7 ${source.name} 鑾峰彇TAF鏁版嵁澶辫触:`, tafError.message);
               }
             }
           }
 
           if (metar) {
             if (config.consoleinfo) {
-              console.log(`成功从备用数据源 ${source.name} 获取METAR数据:`, metar);
+              console.log(`鎴愬姛浠庡鐢ㄦ暟鎹簮 ${source.name} 鑾峰彇METAR鏁版嵄1�7:`, metar);
             }
             break;
           }
@@ -773,7 +563,7 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
       }
     } catch (error) {
       if (config.consoleinfo) {
-        console.log(`从备用数据源 ${source.name} 获取数据失败:`, getErrorMessage(error));
+        console.log(`浠庡鐢ㄦ暟鎹簄1�7 ${source.name} 鑾峰彇鏁版嵁澶辫规1�7:`, error.message);
       }
       continue;
     }
@@ -782,37 +572,36 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
   return { metar, taf };
 }
 
-// 文本输出格式化的函数实现
+// 鏂囨湰杈撳嚭鏍煎紡鍖栫殑鍑芥暟��炵幄1�7
 function formatTextOutput(
   icao: string,
   metar: string,
   taf: string,
   parsedMETAR: ParsedMETAR,
-  airportInfo: AirportInfo | null,
-  flightRules: FlightRules,
-  sunTimes: SunTimes | null,
-  config: Config  // 添加config参数用于翻译
+  airportInfo: AirportInfo,
+  flightRules: string,
+  sunTimes: SunTimes,
+  config: Config  // 娣诲姞config鍙傛暟鐢ㄤ簬缈昏瘄1�7
 ): string {
-  const airportName = formatAirportDisplayName(icao, airportInfo);
-  const elevation = airportInfo ? `${airportInfo.elevationFt} ft` : '未知';
+  const airportName = airportInfo ? `${airportInfo.cnName} (${airportInfo.enName})` : icao;
+  const elevation = airportInfo ? `${airportInfo.elevationFt} ft` : '鏈煄1�7';
   
-  let output = `🌤️ 机场 ${icao} 气象信息\n`;
-  output += `📍 ${airportName}\n`;
-  output += `📏 海拔: ${elevation}\n\n`;
+  let output = `馃尋锄1�7?鏈哄溢� ${icao} 姘旇薄淇℃伅\n`;
+  output += `馃搷 ${airportName}\n`;
+  output += `馃搹 娴锋嫄1�7: ${elevation}\n\n`;
   
-  output += `📊 飞行规则: ${getFlightRulesEmoji(flightRules)} ${flightRules}\n`;
-  output += `🌡️ 温度: ${parsedMETAR.temperature || 'N/A'}°C\n`;
-  output += `💧 露点: ${parsedMETAR.dewpoint || 'N/A'}°C\n`;
-  output += `📏 能见度: ${formatVisibilityDisplay(parsedMETAR.visibility)}\n`;
-  output += `💨 风向: ${parsedMETAR.windDirection || 'N/A'}° 风速: ${parsedMETAR.windSpeed || '0'} ${parsedMETAR.windUnit || 'KT'}\n`;
+  output += `馃搳 椋炶瑙勫垯: ${getFlightRulesEmoji(flightRules)} ${flightRules}\n`;
+  output += `馃尅锄1�7?娓╁宄1�7: ${parsedMETAR.temperature || 'N/A'}掳C\n`;
+  output += `馃挧 闇茬偄1�7: ${parsedMETAR.dewpoint || 'N/A'}掳C\n`;
+  output += `馃搹 鑳��搄1�7? ${parsedMETAR.visibility || 'N/A'} 绫砛n`;
+  output += `馃挩 椋庡悄1�7: ${parsedMETAR.windDirection || 'N/A'}掄1�7 椋庨₄1�7? ${parsedMETAR.windSpeed || '0'} ${parsedMETAR.windUnit || 'KT'}\n`;
   if (parsedMETAR.windGust) {
-    output += `💨 阵风: ${parsedMETAR.windGust} ${parsedMETAR.windUnit || 'KT'}\n`;
+    output += `馃挩 闃甸1�7: ${parsedMETAR.windGust} ${parsedMETAR.windUnit || 'KT'}\n`;
   }
-  output += `📊 气压: ${parsedMETAR.pressure || 'N/A'} ${parsedMETAR.pressureUnit || 'HPA'}\n\n`;
+  output += `馃搳 姘斿帄1�7: ${parsedMETAR.pressure || 'N/A'} ${ 'HPA'}\n\n`;
   
-  // 云层信息 - 使用映射表翻译
-  if (parsedMETAR.clouds.length > 0) {
-    output += `☁️ 云层信息:\n`;
+  // 浜戝眰淇℃伅 - 浣跨敤鏄犲皠琛ㄧ炕璇?  if (parsedMETAR.clouds.length > 0) {
+    output += `鈽侊笄1�7 浜戝眰淇℃伅:\n`;
     parsedMETAR.clouds.forEach(cloud => {
       const cloudDescription = config.cloudCoverageMap.find(item => item.code === cloud.type)?.description || cloud.type;
       if (cloud.type === 'NSC' || cloud.type === 'SKC' || cloud.type === 'CLR') {
@@ -822,38 +611,36 @@ function formatTextOutput(
       }
     });
   } else {
-    output += `☀️ 无显著云层\n`;
+    output += `鈽€锄1�7?鏃犳樉钁椾簯灞俓n`;
   }
   
-  // 天气现象 - 使用映射表翻译
-  if (parsedMETAR.weather.length > 0) {
+  // 澶╂皵鐜拌薄 - 浣跨敤鏄犲皠琛ㄧ炕璇?  if (parsedMETAR.weather.length > 0) {
     const weatherDescriptions = parsedMETAR.weather.map(code => {
       return config.weatherMap.find(item => item.code === code)?.description || code;
     });
-    output += `🌦️ 天气现象: ${weatherDescriptions.join(', ')}\n`;
+    output += `馃對锄1�7?澶╂皵鐜拌薄: ${weatherDescriptions.join(', ')}\n`;
   }
   
-  // 日出日落时间
+  // 鏃ュ嚭鏃ヨ惤鏃堕棄1�7
   if (sunTimes) {
-    output += `\n🌅 日出: ${sunTimes.sunrise} | 🌇 日落: ${sunTimes.sunset}\n`;
+    output += `\n馃寘 鏃ュ嚄1�7: ${sunTimes.sunrise} | 馃寚 鏃ヨ惄1�7: ${sunTimes.sunset}\n`;
   }
   
-  output += `\n📝 METAR: ${stripReportPrefix(metar, 'METAR')}\n`;
+  output += `\n馃摑 METAR: ${metar}\n`;
   if (taf) {
-    output += `📝 TAF: ${stripReportPrefix(taf, 'TAF')}\n`;
+    output += `馃摑 TAF: ${taf}\n`;
   }
   
   return output;
 }
 
-// 获取飞行规则对应的表情符号
-function getFlightRulesEmoji(flightRules: FlightRules): string {
+// 鑾峰彇椋炶瑙勫垯��瑰簲鐨勮��鎯呯鍄1�7?function getFlightRulesEmoji(flightRules: string): string {
   switch (flightRules) {
-    case 'VFR': return '🟢';
-    case 'MVFR': return '🔵';
-    case 'IFR': return '🟡';
-    case 'LIFR': return '🔴';
-    default: return '⚪';
+    case 'VFR': return '馃煝';
+    case 'MVFR': return '馃數';
+    case 'IFR': return '馃煛';
+    case 'LIFR': return '馃敶';
+    default: return '鈄1�7?;
   }
 }
 
@@ -862,20 +649,20 @@ export function apply(ctx: Context, config: Config) {
     .alias(config.commandalias)
     .action(async ({ session }, icao) => {
       if (!icao) {
-        return '请输入机场ICAO代码，例如：metar ZBAA';
+        return '璇疯緭鍏ユ満鍦篒CAO浠ｇ爜锛屼緥濡傦細metar ZBAA';
       }
 
       if (!/^[A-Z]{4}$/.test(icao.toUpperCase())) {
-        return 'ICAO代码格式错误，应为4个大写字母，例如：ZBAA';
+        return 'ICAO浠ｇ爜鏍煎紡閿欒锛屽簲涄1�7?涓ぇ鍐欏瓧姣嶏紝渚嬪锛歓BAA';
       }
 
       icao = icao.toUpperCase();
 
       try {
-        // 获取机场信息
+        // 鑾峰彇鏈哄満淇℃伄1�7
         const airportInfo = await AirportService.getAirportInfo(icao);
         
-        // 并行获取其他数据
+        // 骞惰鑾峰彇鍏朵粬鏁版嵁
         const [runways, metarData, sunTimes] = await Promise.all([
           AirportService.getRunways(icao),
           fetchMETARData(icao, config),
@@ -883,18 +670,18 @@ export function apply(ctx: Context, config: Config) {
         ]);
 
         if (!metarData.metar) {
-          return `无法获取 ${icao} 的METAR数据`;
+          return `鏃犳硶鑾峰彇 ${icao} 鐨凪ETAR鏁版嵁`;
         }
 
-        // 解析METAR
+        // 瑙ｆ瀽METAR
         const parsedMETAR = METARParser.parse(metarData.metar);
         
-        // 计算风分量和飞行规则
+        // 璁＄畻椋庡垎閲忓拰椋炶瑙勫垄1�7
         const windDirection = parseInt(parsedMETAR.windDirection) || 0;
-        const windSpeed = getWindSpeedInKnots(parsedMETAR);
+        const windSpeed = parseInt(parsedMETAR.windSpeed) || 0;
         
-        // 计算所有跑道的风分量并按逆风分量排序
-        let runwayWindComponents: RunwayWindComponent[] = runways.map(runway => {
+        // 璁＄畻鎵€鏈夎窇閬撶殑椋庡垎閲忓苟鎸夐€嗛鍒嗛噺鎺掑簭
+        let runwayWindComponents = runways.map(runway => {
           const heading = parseInt(runway.leHeadingDegt) || 0;
           return {
             runway,
@@ -902,15 +689,13 @@ export function apply(ctx: Context, config: Config) {
           };
         });
 
-        // 按逆风分量从大到小排序（逆风优先）
-        runwayWindComponents.sort((a, b) => b.components.headwind - a.components.headwind);
+        // 鎸夐€嗛鍒嗛噺浠庡ぇ鍒板皬鎺掑簭锛堥€嗛浼樺厛锛?        runwayWindComponents.sort((a, b) => b.components.headwind - a.components.headwind);
 
         const flightRules = FlightRulesCalculator.getFlightRules(parsedMETAR);
 
-        // 修复艾特用户问题 - 使用正确的格式
-        const userMention = session ? h('at', { id: session.userId }) : '';
+        // 淇鑹剧壒鐢ㄦ埛闂�1�7 - 浣跨敤姝ｇ��鐨勬牸寄1�7?        const userMention = session ? h('at', { id: session.userId }) : '';
 
-        // 根据输出模式返回结果
+        // 鏍规嵁杈撳嚭妯��紡杩斿洖缁撴灉
         if (config.outputMode === 'text') {
           const textOutput = formatTextOutput(icao, metarData.metar, metarData.taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
           return userMention ? [userMention, textOutput] : textOutput;
@@ -919,56 +704,52 @@ export function apply(ctx: Context, config: Config) {
             ctx, icao, metarData.metar, metarData.taf, parsedMETAR, 
             airportInfo, runways, runwayWindComponents, flightRules, config, sunTimes
           );
-          // 图片模式下也要艾特用户
-          return userMention ? [userMention, imageOutput] : imageOutput;
+          // 鍥剧墖妯″紡涓嬩篃瑕佽壘鐗圭敤鎴?          return userMention ? [userMention, imageOutput] : imageOutput;
         } else {
           const textOutput = formatTextOutput(icao, metarData.metar, metarData.taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
           const imageOutput = await generateImageOutput(
             ctx, icao, metarData.metar, metarData.taf, parsedMETAR,
             airportInfo, runways, runwayWindComponents, flightRules, config, sunTimes
           );
-          // 混合模式下也要艾特用户
-          return userMention ? [userMention, textOutput, imageOutput] : [textOutput, imageOutput];
+          // 娣峰悎妯″紡涓嬩篃瑕佽壘鐗圭敤鎴?          return userMention ? [userMention, textOutput, imageOutput] : [textOutput, imageOutput];
         }
 
       } catch (error) {
         if (config.consoleinfo) {
-          console.error('气象查询错误:', error);
+          console.error('姘旇薄鏌ヨ閿欒1�7:', error);
         }
-        return `查询气象数据时出现错误: ${getErrorMessage(error)}`;
+        return `鏌ヨ姘旇薄鏁版嵁鏃跺嚭鐜伴敊璇? ${error.message}`;
       }
     });
 
-  // 图片输出生成
+  // 鍥剧墖杈撳嚭鐢熸垄1�7
   async function generateImageOutput(
     ctx: Context, 
     icao: string, 
     metar: string, 
     taf: string, 
     parsedMETAR: ParsedMETAR,
-    airportInfo: AirportInfo | null,
+    airportInfo: AirportInfo,
     runways: RunwayInfo[],
-    runwayWindComponents: RunwayWindComponent[],
-    flightRules: FlightRules,
+    runwayWindComponents: any[],
+    flightRules: string,
     config: Config,
-    sunTimes: SunTimes | null
+    sunTimes: SunTimes
   ) {
-    // 检查 puppeteer 是否可用
+    // 妫€鏄1�7?puppeteer 鏄惁鍙敤
     if (!ctx.puppeteer) {
       const textOutput = formatTextOutput(icao, metar, taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
-      return `图片生成功能需要安装 puppeteer 插件，以下是文本格式的气象信息：\n\n${textOutput}`;
+      return `鍥剧墖鐢熸垚鍔熻兘闇€瑕佸畨瑄1�7?puppeteer 鎻掍欢锛屼互涓嬫槸鏂囨湰鏍煎紡鐨勬皵璞��俊鎭細\n\n${textOutput}`;
     }
 
     try {
       const page = await ctx.puppeteer.page();
-      const viewportWidth = config.imageWidth ?? 1600;
-      const viewportHeight = config.imageHeight ?? 900;
       
-      // 设置视口大小以提高清晰度
+      // 璁剧疆瑙嗗彛澶у皬浠ユ彁楂樻竻鏅板宄1�7
       if (config.imageMode === 'manual') {
         await page.setViewport({
-          width: viewportWidth,
-          height: viewportHeight,
+          width: config.imageWidth,
+          height: config.imageHeight,
           deviceScaleFactor: 2
         });
       } else {
@@ -979,33 +760,33 @@ export function apply(ctx: Context, config: Config) {
         });
       }
 
-      // 创建现代化的HTML内容
+      // 鍒涘缓鐜颁唬鍖栫殑HTML鍐呭1�7
       const htmlContent = createModernWeatherHTML(
         icao, metar, taf, parsedMETAR, airportInfo, 
         runways, runwayWindComponents, flightRules, config, sunTimes
       );
 
-      // 设置页面内容
+      // 璁剧疆椤甸潰鍐呭1�7
       await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
 
-      // 截图选项
+      // 鎴浘閫夐��1�7
       const screenshotOptions: any = {
         type: 'jpeg',
         quality: config.screenshotquality,
         encoding: 'binary'
       };
 
-      // 设置截图尺寸
+      // 璁剧疆鎴浘灏哄1�7
       if (config.imageMode === 'manual') {
         screenshotOptions.clip = {
           x: 0,
           y: 0,
-          width: viewportWidth,
-          height: viewportHeight
+          width: config.imageWidth,
+          height: config.imageHeight
         };
       } else {
-        // 自动模式 - 根据内容调整大小
-        const element = await page.$('.page-shell');
+        // 鑷姩妯″紡 - 鏍规嵁鍐呭璋冩暣澶у的1�7
+        const element = await page.$('.weather-container');
         if (element) {
           const boundingBox = await element.boundingBox();
           if (boundingBox) {
@@ -1019,10 +800,10 @@ export function apply(ctx: Context, config: Config) {
         }
       }
 
-      // 截图
+      // 鎴浄1�7
       const screenshot = await page.screenshot(screenshotOptions) as unknown as Buffer;
 
-      // 关闭页面（如果启用自动关闭）
+      // 鍏抽棴椤甸潰锛堝鏋滃惎鐢ㄨ嚜鍔ㄥ叧闂約1�7
       if (config.pageautoclose) {
         await page.close();
       }
@@ -1031,61 +812,86 @@ export function apply(ctx: Context, config: Config) {
 
     } catch (error) {
       if (config.consoleinfo) {
-        console.error('图片生成错误:', error);
+        console.error('鍥剧墖鐢熸垚閿欒1�7:', error);
       }
-      // 图片生成失败时回退到文本输出
-      const textOutput = formatTextOutput(icao, metar, taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
-      return `生成图片时出现错误，以下是文本格式的气象信息：\n\n${textOutput}`;
+      // 鍥剧墖鐢熸垚澶辫触鏃跺洖閫€鍒版枃鏈緭鍄1�7?      const textOutput = formatTextOutput(icao, metar, taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
+      return `鐢熸垚鍥剧墖鏃跺嚭鐜伴敊璇紝浠ヤ笅鏄枃鏈牸寮忕殑姘旇薄淇℃伅锛歕n\n${textOutput}`;
     }
   }
 
-  // 创建现代化的天气信息HTML
-function createModernWeatherHTML(
+  let cachedWindSvgDataUri: string | null | undefined;
+  function getWindSvgDataUri(): string | null {
+    if (cachedWindSvgDataUri !== undefined) return cachedWindSvgDataUri;
+
+    const candidates = [
+      path.join(__dirname, 'wind.svg'),
+      path.join(__dirname, '../src/wind.svg'),
+      path.join(__dirname, '../dist/wind.svg'),
+    ];
+
+    for (const filePath of candidates) {
+      try {
+        if (!fs.existsSync(filePath)) continue;
+        const svg = fs.readFileSync(filePath);
+        cachedWindSvgDataUri = `data:image/svg+xml;base64,${svg.toString('base64')}`;
+        return cachedWindSvgDataUri;
+      } catch {
+        // ignore and try next candidate
+      }
+    }
+
+    cachedWindSvgDataUri = null;
+    return cachedWindSvgDataUri;
+  }
+
+  function getWindCompassBackground(): string | null {
+    const dataUri = getWindSvgDataUri();
+    if (!dataUri) return null;
+    return `<image href="${dataUri}" xlink:href="${dataUri}" x="0" y="0" width="300" height="300" />`;
+  }
+
+  // 鍒涘缓鐜颁唬鍖栫殑澶╂皵淇℃伅HTML
+  function createModernWeatherHTML(
     icao: string,
     metar: string,
     taf: string,
     parsedMETAR: ParsedMETAR,
-    airportInfo: AirportInfo | null,
+    airportInfo: AirportInfo,
     runways: RunwayInfo[],
-    runwayWindComponents: RunwayWindComponent[],
-    flightRules: FlightRules,
+    runwayWindComponents: any[],
+    flightRules: string,
     config: Config,
-    sunTimes: SunTimes | null
+    sunTimes: SunTimes
   ): string {
-    const airportName = formatAirportDisplayName(icao, airportInfo);
-    const countryName = getCountryDisplayName(airportInfo, icao);
-    const firRegion = getFIRRegion(icao);
-    const locationText = getAirportLocationText(airportInfo, countryName);
+    const airportName = airportInfo ? airportInfo.cnName : `${icao} Airport`;
     const windDirection = parseInt(parsedMETAR.windDirection) || 0;
-    const windSpeed = getWindSpeedInKnots(parsedMETAR);
+    const windSpeed = parseInt(parsedMETAR.windSpeed) || 0;
     const temperature = parsedMETAR.temperature || 'N/A';
     const dewpoint = parsedMETAR.dewpoint || 'N/A';
+    const pressure = parsedMETAR.pressure || 'N/A';
+    const visibility = parsedMETAR.visibility || 'N/A';
+    
+    // 璁＄畻鐩稿婢�垮害
     const humidity = calculateHumidity(parseInt(temperature), parseInt(dewpoint));
-    const rawMetar = escapeHtml(stripReportPrefix(metar, 'METAR'));
-    const rawTaf = escapeHtml(stripReportPrefix(taf, 'TAF'));
-    const weatherIcon = getModernWeatherIcon(parsedMETAR.weather, parsedMETAR.clouds, config);
-
+    
+    // 鑾峰彇褰撳墠鏃堕棄1�7
     const now = new Date();
     const localTime = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     const localDate = now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
-
+    
+    // 鐢熸垚璺戦亾閫夋嫨鍣?- 鎸夐€嗛浼樺厛鎺掑簄1�7
     const runwaySelector = generateModernRunwaySelector(runways, runwayWindComponents);
+    
+    // 鐢熸垚浜戝眰淇℃伄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?    const cloudInfo = generateModernCloudInfo(parsedMETAR.clouds, config);
+    
+    // 鐢熸垚璺戦亾琛ㄦ牄1�7
     const runwayTable = generateModernRunwayTable(runwayWindComponents);
-    const cloudInfo = generateModernCloudInfo(parsedMETAR.clouds, config);
+    
+    // 鐢熸垚鐜颁唬鍖栫殑缃楃洏 - 淇椋庡悜鏍囧繄1�7
     const modernCompass = generateModernCompass(windDirection, windSpeed, runways, runwayWindComponents);
-    const articleSection = generateReferenceArticleSection(
-      icao,
-      airportName,
-      airportInfo,
-      parsedMETAR,
-      runways,
-      humidity,
-      sunTimes,
-      countryName,
-      firRegion,
-      config
-    );
-    const factsSection = generateSupplementalFactsSection(parsedMETAR, humidity, sunTimes, config);
+    
+    // 鑾峰彇澶╂皵鍥炬爄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?    
+    // const weatherIcon = getModernWeatherIcon(parsedMETAR.weather, parsedMETAR.clouds, config);
 
     return `
 <!DOCTYPE html>
@@ -1099,87 +905,101 @@ function createModernWeatherHTML(
     </style>
 </head>
 <body>
-    <div class="page-shell">
-        <header class="site-header">
-            <div class="brand-block">
-                <div class="brand-icon">WX</div>
-                <div>
-                    <div class="brand-title">METAR Weather Report</div>
-                    <div class="brand-subtitle">${airportName}</div>
+    <div class="weather-container">
+        <!-- 椤堕儴��艰埄1�7 -->
+        <nav class="top-nav">
+            <div class="nav-breadcrumb">
+                <a href="javascript:void(0)">鍥藉1�7</a>
+                <span class="separator">鈄1�7?/span>
+                <a href="javascript:void(0)">${getFIRRegion(icao)}</a>
+                <span class="separator">鈄1�7?/span>
+                <a href="javascript:void(0)">${getFIRRegion(icao)} 椋炶鎯呮姤鍄1�7?/a>
+            </div>
+        </nav>
+
+        <!-- 鏍囬鍖哄煙 -->
+        <div class="header-section">
+            <div class="airport-title">
+                <h1>馃尋锄1�7?鏈哄溢� ${icao} 姘旇薄淇℃伅</h1>
+                <h2>${airportName}</h2>
+            </div>
+            <div class="time-info">
+                <div class="station-selector">
+                    <span class="station-name">${icao}</span>
+                </div>
+                <div class="local-time">
+                    <span class="date">${localDate}</span>
+                    ${localTime} LT
+                </div>
+                <div class="observation-time">
+                    <span class="time-ago">${getTimeAgo(parsedMETAR.time)}</span>
                 </div>
             </div>
-            <div class="site-header-meta">${icao} - ${locationText}</div>
-        </header>
+        </div>
 
-        <div class="report-hero">
-            <div class="report-tabs">
-                <span class="report-tab active">METAR</span>
-                ${taf ? '<span class="report-tab">TAF</span>' : ''}
-                <span class="report-tab muted">Airport</span>
-            </div>
+        <!-- 鎸囨爣鍗＄墖 -->
+        <div class="metrics-grid">
+            ${generateModernMetricCards(parsedMETAR, flightRules, humidity, config, sunTimes, weatherIcon)}
+        </div>
 
-            <nav class="top-nav">
-                <div class="nav-breadcrumb">
-                    <a href="javascript:void(0)">Countries</a>
-                    <span class="separator">></span>
-                    <a href="javascript:void(0)">${countryName}</a>
-                    <span class="separator">></span>
-                    <a href="javascript:void(0)">${firRegion}</a>
+        <div class="main-content">
+            <div class="left-column">
+                <!-- 缃楃洏鍖哄煙 -->
+                ${modernCompass}
+
+                <!-- 鏈哄溢�瑙傛祄1�7 -->
+                <div class="observation-section">
+                    <h2>鏈哄溢�瑙傛祄1�7</h2>
+                    <p>${generateModernObservationText(parsedMETAR, humidity, config)}</p>
                 </div>
-            </nav>
 
-            <div class="header-section">
-                <div class="airport-title">
-                    <div class="eyebrow">Airport weather observation</div>
-                    <h1>METAR ${icao} - ${airportName}</h1>
-                    <h2>${locationText}</h2>
-                </div>
-                <div class="time-info">
-                    <div class="station-selector">
-                        <span class="station-name">${icao}</span>
-                    </div>
-                    <div class="local-time">
-                        <span class="date">${localDate}</span>
-                        ${localTime} LT
-                    </div>
-                    <div class="observation-time">
-                        <span class="time-ago">${getObservationTimestamp(parsedMETAR)}</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="metrics-grid">
-                ${generateModernMetricCards(parsedMETAR, flightRules, humidity, config, sunTimes, weatherIcon)}
-            </div>
-
-            <div class="main-content">
-                <div class="left-column">
-                    ${modernCompass}
-                    ${runwaySelector}
-                </div>
-                <div class="right-column">
-                    <div class="panel cloud-profile-section">
-                        <h2>Cloud Profile</h2>
-                        <div class="cloud-profile">
-                            ${generateModernCloudProfile(parsedMETAR.clouds, config)}
-                        </div>
-                    </div>
-
-                    <div class="raw-data-section panel">
-                        <code>METAR ${rawMetar}</code>
-                        ${taf ? `<code class="taf-code">TAF ${rawTaf}</code>` : ''}
-                    </div>
-                </div>
-            </div>
-
-            <div class="bottom-grid">
-                ${articleSection}
-                ${runwayTable}
-            </div>
-
-            <div class="bottom-grid compact">
+                <!-- 浜戝眰淇℃伅琛ㄦ牄1�7 -->
                 ${cloudInfo}
-                ${factsSection}
+
+                <!-- 璺戦亾閫夋嫨鍄1�7?-->
+                ${runwaySelector}
+            </div>
+            
+            <div class="right-column">
+                <!-- 浜戝眰鍓栭潰鍄1�7?-->
+                <div class="cloud-profile-section">
+                    <h2>浜戝眰鍓栭潰</h2>
+                    <div class="cloud-profile">
+                        ${generateModernCloudProfile(parsedMETAR.clouds, config)}
+                    </div>
+                </div>
+                
+                <!-- METAR鍘熷鏁版嵁 -->
+                <div class="raw-data-section">
+                    <code>METAR ${metar}</code>
+                    ${taf ? `<code class="taf-code">TAF ${taf}</code>` : ''}
+                </div>
+
+                <!-- 璺戦亾淇℃伅琛ㄦ牄1�7 -->
+                ${runwayTable}
+                
+                <!-- 娓╁害澶╂皵琛ㄦ牄1�7 -->
+                <div class="temperature-section">
+                    <h2>娓╁宄1�7 & 澶╂的1�7</h2>
+                    <table class="data-table">
+                        <tr>
+                            <td>娓╁宄1�7</td>
+                            <td>${temperature} 掳C</td>
+                        </tr>
+                        <tr>
+                            <td>闇茬偄1�7</td>
+                            <td>${dewpoint} 掳C</td>
+                        </tr>
+                        <tr>
+                            <td>鐩稿婀垮害</td>
+                            <td>${humidity}%</td>
+                        </tr>
+                        <tr>
+                            <td>姘斿帄1�7</td>
+                            <td>${pressure} ${parsedMETAR.pressureUnit || 'hPa'}</td>
+                        </tr>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -1187,84 +1007,75 @@ function createModernWeatherHTML(
 </html>`;
   }
 
-  // 生成现代化的指标卡片
-  function generateModernMetricCards(parsedMETAR: ParsedMETAR, flightRules: FlightRules, humidity: string, config: Config, sunTimes: SunTimes | null, weatherIcon: string): string {
+  // 鐢熸垚鐜颁唬鍖栫殑鎸囨爣鍗＄墄1�7
+  function generateModernMetricCards(parsedMETAR: ParsedMETAR, flightRules: string, humidity: string, config: Config, sunTimes: SunTimes, weatherIcon: string): string {
     const temperature = parsedMETAR.temperature || 'N/A';
-    const windSpeed = getWindSpeedInKnots(parsedMETAR);
+    const windSpeed = parsedMETAR.windSpeed || '0';
     const windDirection = parsedMETAR.windDirection || '0';
-    const visibility = formatVisibilityDisplay(parsedMETAR.visibility);
+    const visibility = parsedMETAR.visibility || 'N/A';
     const pressure = parsedMETAR.pressure || 'N/A';
+    
+    // 椋炶瑙勫垯瀵瑰簲鐨凜SS绫诲拰鑳屾櫙棰滆壄1�7
     const flightRuleClass = flightRules.toLowerCase();
-    const flightRuleColors: Record<'vfr' | 'mvfr' | 'ifr' | 'lifr', { bg: string; color: string }> = {
-      'vfr': { bg: '#28a745', color: '#ffffff' },
-      'mvfr': { bg: '#35a7ff', color: '#ffffff' },
-      'ifr': { bg: '#dc3545', color: '#ffffff' },
-      'lifr': { bg: '#6f42c1', color: '#ffffff' }
+    const flightRuleColors = {
+      'vfr': { bg: 'rgba(40, 167, 69, 0.6)', color: '#28a745' },
+      'mvfr': { bg: 'rgba(23, 162, 184, 0.6)', color: '#17a2b8' },
+      'ifr': { bg: 'rgba(255, 193, 7, 0.6)', color: '#ffc107' },
+      'lifr': { bg: 'rgba(220, 53, 69, 0.6)', color: '#dc3545' }
     };
-    const flightRuleStyle = flightRuleColors[flightRuleClass as keyof typeof flightRuleColors] || flightRuleColors.vfr;
-    const weatherDescription = getWeatherDescription(parsedMETAR.weather, config);
-    const warningText = getWarnings(parsedMETAR, config);
-    const daylightText = sunTimes ? `${sunTimes.sunrise} / ${sunTimes.sunset}` : `${humidity}% RH`;
+    
+    const flightRuleStyle = flightRuleColors[flightRuleClass] || flightRuleColors['vfr'];
+    
+    // 鑾峰彇澶╂皵鎻忚堄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?    const weatherDescription = getWeatherDescription(parsedMETAR.weather, config);
 
     return `
     <div class="metric-card">
-        <div class="metric-accent" style="background: ${flightRuleStyle.bg}; color: ${flightRuleStyle.color}">
-            <h3>${flightRules}</h3>
-        </div>
-        <div class="metric-body">
-            <div class="metric-subtle">${warningText}</div>
+        <div class="metric-value" style="color: ${flightRuleStyle.color}">${flightRules}</div>
+        <div class="metric-header" style="background: ${flightRuleStyle.bg}">
+            <div class="metric-label">${getWarnings(parsedMETAR, config)}</div>
         </div>
     </div>
 
-    <div class="metric-card metric-weather">
-        <div class="metric-body weather-metric">
+    <div class="metric-card">
+        <div class="weather-metric">
             <div class="weather-info">
-                <div class="metric-number">${temperature}&deg;C</div>
-                <div class="metric-subtle">${weatherDescription}</div>
+                <div class="metric-value">${temperature}掳C</div>
+                <div class="metric-label">${weatherDescription}</div>
             </div>
             <div class="weather-icon weather-icon-large">${weatherIcon}</div>
         </div>
     </div>
 
     <div class="metric-card">
-        <div class="metric-accent metric-accent-soft">
-            <h3>${windSpeed} kt</h3>
-        </div>
-        <div class="metric-body">
-            <div class="metric-subtle">${windDirection}&deg;</div>
+        <div class="metric-value">${windSpeed} kt</div>
+        <div class="metric-header" style="background: rgba(40, 167, 69, 0.6);">
+            <div class="metric-label">${windDirection}掄1�7</div>
         </div>
     </div>
 
     <div class="metric-card">
-        <div class="metric-accent metric-accent-soft">
-            <h3>${visibility}</h3>
-        </div>
-        <div class="metric-body">
-            <div class="metric-subtle">Visibility</div>
+        <div class="metric-value">${visibility}</div>
+        <div class="metric-header" style="background: rgba(40, 167, 69, 0.6);">
+            <div class="metric-label">鑳��搄1�7?/div>
         </div>
     </div>
 
     <div class="metric-card">
-        <div class="metric-accent metric-accent-soft">
-            <h3>${getCeiling(parsedMETAR.clouds)}</h3>
-        </div>
-        <div class="metric-body">
-            <div class="metric-subtle">Ceiling</div>
+        <div class="metric-value">${getCeiling(parsedMETAR.clouds)}</div>
+        <div class="metric-header" style="background: rgba(40, 167, 69, 0.6);">
+            <div class="metric-label">浜戝簳楂樺害</div>
         </div>
     </div>
 
     <div class="metric-card">
-        <div class="metric-accent metric-accent-quiet">
-            <h3>${pressure} ${parsedMETAR.pressureUnit || 'hPa'}</h3>
-        </div>
-        <div class="metric-body">
-            <div class="metric-subtle">${daylightText}</div>
+        <div class="metric-value">${pressure}</div>
+        <div class="metric-header" style="background: rgba(42, 109, 161, 0.6);">
+            <div class="metric-label">${parsedMETAR.pressureUnit || '姘斿帄1�7'}</div>
         </div>
     </div>`;
   }
 
-  // 修改CSS样式以支持新的布局 - 固定跑道和云层剖面大小
-  function getModernCSS(): string {
+  // 淇敼CSS鏍峰紡浠ユ敮鎸佹柊鐨勫竷灞€ - 鍥哄畾璺戦亾鍜屼簯灞傚墫闈㈠ぇ灏?  function getModernCSS(): string {
     return `
     * {
         margin: 0;
@@ -1274,7 +1085,7 @@ function createModernWeatherHTML(
 
     body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        background: linear-gradient(135deg, #1a4b6d 0%, #0d3a5c 100%);
+        background: #0057a3;
         color: #ffffff;
         line-height: 1.6;
     }
@@ -1285,7 +1096,7 @@ function createModernWeatherHTML(
         padding: 20px;
     }
 
-    /* 顶部导航 */
+    /* 椤堕儴��艰埄1�7 */
     .top-nav {
         margin-bottom: 20px;
     }
@@ -1313,7 +1124,7 @@ function createModernWeatherHTML(
         opacity: 0.6;
     }
 
-    /* 标题区域 */
+    /* 鏍囬鍖哄煙 */
     .header-section {
         display: flex;
         justify-content: space-between;
@@ -1371,7 +1182,7 @@ function createModernWeatherHTML(
         gap: 8px;
     }
 
-    /* 指标卡片网格 */
+    /* 鎸囨爣鍗＄墖缃戞牄1�7 */
     .metrics-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1397,7 +1208,7 @@ function createModernWeatherHTML(
         background: rgba(13, 58, 92, 1);
     }
 
-    /* metric值在上，header在下 */
+    /* metric鍊煎湪涓婏紝header鍦ㄤ笄1�7 */
     .metric-value {
         font-size: 28px;
         font-weight: 700;
@@ -1438,7 +1249,7 @@ function createModernWeatherHTML(
         text-align: left;
     }
 
-    /* 主要内容区域 */
+    /* 涓昏鍐呭鍖哄煄1�7 */
     .main-content {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -1446,7 +1257,7 @@ function createModernWeatherHTML(
         margin-bottom: 30px;
     }
 
-    /* 机场标题 */
+    /* 鏈哄溢�鏍囬1�7 */
     .airport-header {
         margin-bottom: 20px;
     }
@@ -1458,18 +1269,18 @@ function createModernWeatherHTML(
         color: #ffffff;
     }
 
-    /* 罗盘和风速指示器布局 - 固定大小 */
+    /* 缃楃洏鍜岄閫熸寚绀哄櫒甯冨眄1�7 - 鍥哄畾澶у的1�7 */
     .compass-and-wind {
         display: flex;
         gap: 20px;
         align-items: flex-start;
-        height: 320px; /* 固定高度 */
+        height: 320px; /* 鍥哄畾楂樺害 */
     }
 
     .compass-section {
         flex: 1;
         min-width: 0;
-        height: 100%; /* 固定高度 */
+        height: 100%; /* 鍥哄畾楂樺害 */
     }
 
     .wind-speed-indicator {
@@ -1480,18 +1291,18 @@ function createModernWeatherHTML(
         align-items: center;
         justify-content: center;
         margin-top: 20px;
-        margin-left: -100px; /* 向左移动100px */
-        height: 100%; /* 固定高度 */
+        margin-left: -100px; /* 鍚戝乏绉诲姩100px */
+        height: 100%; /* 鍥哄畾楂樺害 */
     }
 
-    /* 修复罗盘显示不全问题 - 固定大小 */
+    /* 淇缃楃洏鏄剧ず涓嶅叏闂1�7 - 鍥哄畾澶у的1�7 */
     .compass-container {
         background: rgba(13, 58, 92, 0.8);
         border-radius: 12px;
         padding: 15px;
         margin-bottom: 20px;
         width: 100%;
-        height: 420px; /* 固定高度 */
+        height: 420px; /* 鍥哄畾楂樺害 */
         box-sizing: border-box;
     }
 
@@ -1506,7 +1317,7 @@ function createModernWeatherHTML(
     .compass-wrapper {
         position: relative;
         width: 100%;
-        height: 250px; /* 固定高度 */
+        height: 250px; /* 鍥哄畾楂樺害 */
         display: flex;
         justify-content: center;
         align-items: center;
@@ -1515,8 +1326,8 @@ function createModernWeatherHTML(
     .compass-svg {
         width: 100%;
         height: 100%;
-        max-width: 250px; /* 固定最大宽度 */
-        max-height: 250px; /* 固定最大高度 */
+        max-width: 250px; /* 鍥哄畾鏈€澶у搴?*/
+        max-height: 250px; /* 鍥哄畾鏈€澶ч珮搴?*/
     }
 
     .wind-info {
@@ -1526,10 +1337,10 @@ function createModernWeatherHTML(
         margin-top: 10px;
     }
 
-    /* 风速指示器样式 - 固定大小 */
+    /* 椋庨€熸寚绀哄櫒鏍峰約1�7 - 鍥哄畾澶у的1�7 */
     .wind-speed-container {
         width: 90%;
-        height: 250px; /* 固定高度 */
+        height: 250px; /* 鍥哄畾楂樺害 */
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1547,7 +1358,7 @@ function createModernWeatherHTML(
     .wind-speed-gauge {
         position: relative;
         width: 100%;
-        height: 200px; /* 固定高度 */
+        height: 200px; /* 鍥哄畾楂樺害 */
         margin-bottom: 10px;
         display: flex;
         justify-content: center;
@@ -1557,32 +1368,29 @@ function createModernWeatherHTML(
     .wind-speed-dial {
         width: 100%;
         height: 100%;
-        max-width: 400px; /* 固定最大宽度 */
-        display: block;
+        max-width: 400px; /* 鍥哄畾鏈€澶у搴?*/
     }
 
     .wind-speed-pointer {
         position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 170px;
-        height: 170px;
-        transform: translate(-50%, -50%) rotate(var(--rotation, 0deg));
-        transform-origin: 50% 50%;
+        top: 0;
+        left: 150px;
+        width: 100%;
+        height: 100%;
+        transform-origin: 80% 50%;
         transition: transform 0.5s ease;
         display: flex;
         justify-content: center;
         align-items: center;
-        pointer-events: none;
-        z-index: 2;
     }
 
-    /* 修改风速指针位置 */
+    /* 淇敼椋庨€熸寚閽堜綅缃?*/
     .wind-pointer {
-        width: 100%;
-        height: 100%;
-        display: block;
-        overflow: visible;
+        width: 80%;
+        right:200px;
+        height: 80%;
+        transform: translate(calc(-20% + 42px), 50px);
+}
     }
 
     .wind-speed-value {
@@ -1599,7 +1407,7 @@ function createModernWeatherHTML(
         color: #4cb3a4;
     }
 
-    /* 跑道选择器 */
+    /* 璺戦亾閫夋嫨鍄1�7?*/
     .runway-selector {
         display: flex;
         gap: 15px;
@@ -1629,7 +1437,7 @@ function createModernWeatherHTML(
         background: rgba(42, 109, 161, 0.8);
     }
 
-    /* 跑道SVG样式 */
+    /* 璺戦亾SVG鏍峰約1�7 */
     .runway-svg {
         width: 100%;
         height: auto;
@@ -1637,7 +1445,7 @@ function createModernWeatherHTML(
         margin: 5px 0;
     }
 
-    /* 表格样式 */
+    /* 琛ㄦ牸鏍峰紡 */
     .data-table {
         width: 100%;
         border-collapse: collapse;
@@ -1654,7 +1462,7 @@ function createModernWeatherHTML(
         background: rgba(42, 109, 161, 0.3);
     }
 
-    /* 原始数据区域 */
+    /* 鍘熷鏁版嵁鍖哄煄1�7 */
     .raw-data-section {
         background: rgba(13, 58, 92, 0.8);
         border-radius: 8px;
@@ -1675,10 +1483,10 @@ function createModernWeatherHTML(
         border-top: 1px solid rgba(255, 255, 255, 0.1);
     }
 
-    /* 云层剖面图 - 固定大小 */
+    /* 浜戝眰鍓栭潰鍄1�7?- 鍥哄畾澶у的1�7 */
     .cloud-profile-section {
         margin: 20px 0;
-        height: 350px; /* 固定高度 */
+        height: 350px; /* 鍥哄畾楂樺害 */
     }
 
     .cloud-profile-section h2 {
@@ -1691,7 +1499,7 @@ function createModernWeatherHTML(
         background: rgba(0, 0, 0, 0.2);
         border-radius: 8px;
         padding: 20px;
-        height: 300px; /* 固定高度 */
+        height: 300px; /* 鍥哄畾楂樺害 */
         position: relative;
     }
 
@@ -1770,7 +1578,7 @@ function createModernWeatherHTML(
         overflow: hidden;
     }
 
-    /* 观测区域 */
+    /* 瑙傛祴鍖哄煙 */
     .observation-section {
         margin-top: 20px;
     }
@@ -1786,7 +1594,7 @@ function createModernWeatherHTML(
         opacity: 0.9;
     }
 
-    /* 响应式设计 */
+    /* 鍝嶅簲寮忚璄1�7?*/
     @media (max-width: 768px) {
         .main-content {
             grid-template-columns: 1fr;
@@ -1808,13 +1616,13 @@ function createModernWeatherHTML(
         
         .compass-and-wind {
             flex-direction: column;
-            height: auto; /* 移动端取消固定高度 */
+            height: auto; /* 绉诲姩绔彇娑堝浐��氶珮搴?*/
         }
         
         .compass-section,
         .wind-speed-indicator {
             width: 100%;
-            height: 300px; /* 移动端固定高度 */
+            height: 300px; /* 绉诲姩绔浐瀹氶珮搴?*/
         }
         
         .compass-wrapper {
@@ -1833,12 +1641,12 @@ function createModernWeatherHTML(
             min-width: 100px;
         }
         
-        /* 移动端恢复风速指示器位置 */
+        /* 绉诲姩绔仮澶嶉閫熸寚绢�哄櫒浣嶇疄1�7 */
         .wind-speed-indicator {
             margin-left: 0;
         }
         
-        /* 移动端云层剖面图高度调整 */
+        /* 绉诲姩绔簯灞傚墫闈㈠浘楂樺害璋冩暣 */
         .cloud-profile-section {
             height: 300px;
         }
@@ -1848,14 +1656,14 @@ function createModernWeatherHTML(
         }
     }
 
-    /* 辅助文本 */
+    /* 杈呭姪鏂囨湰 */
     .help-text {
         font-size: 12px;
         opacity: 0.7;
         margin-top: 5px;
     }
 
-    /* 白天时段信息 */
+    /* 鐧藉ぉ鏃舵淇℃伄1�7 */
     .daylight-info {
         margin-top: 20px;
     }
@@ -1865,400 +1673,26 @@ function createModernWeatherHTML(
         font-size: 22px;
         font-weight: 600;
     }
-
-    .page-shell {
-        min-height: 100vh;
-        background: #f3f6fb;
-    }
-
-    .site-header {
-        max-width: 1440px;
-        margin: 0 auto;
-        padding: 20px 28px 16px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 16px;
-        color: #103550;
-    }
-
-    .brand-block {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-    }
-
-    .brand-icon {
-        width: 42px;
-        height: 42px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, #1f5c88, #133e5f);
-        color: #ffffff;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 12px 24px rgba(20, 52, 82, 0.18);
-    }
-
-    .brand-title {
-        font-size: 14px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: #6d8195;
-    }
-
-    .brand-subtitle {
-        font-size: 18px;
-        font-weight: 700;
-        color: #143754;
-    }
-
-    .site-header-meta {
-        font-size: 13px;
-        color: #6d8195;
-    }
-
-    .report-hero {
-        max-width: 1440px;
-        margin: 0 auto 32px;
-        padding: 20px 28px 28px;
-        background: linear-gradient(180deg, #1f5c88 0%, #174c72 100%);
-        border-radius: 0 0 22px 22px;
-        box-shadow: 0 22px 40px rgba(20, 52, 82, 0.22);
-    }
-
-    .report-tabs {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 18px;
-    }
-
-    .report-tab {
-        padding: 7px 14px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.14);
-        color: #ffffff;
-        font-size: 13px;
-        font-weight: 600;
-    }
-
-    .report-tab.active {
-        background: rgba(255, 255, 255, 0.22);
-    }
-
-    .report-tab.muted {
-        opacity: 0.72;
-    }
-
-    .eyebrow {
-        font-size: 12px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.68);
-        margin-bottom: 6px;
-    }
-
-    .metric-accent {
-        padding: 14px 16px 12px;
-        min-height: 54px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-    }
-
-    .metric-accent h3 {
-        font-size: 24px;
-        line-height: 1.1;
-        font-weight: 700;
-    }
-
-    .metric-accent-soft {
-        background: #2a8f5b;
-    }
-
-    .metric-accent-quiet {
-        background: #295878;
-    }
-
-    .metric-body {
-        padding: 16px;
-        min-height: 68px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-    }
-
-    .metric-number {
-        font-size: 28px;
-        font-weight: 700;
-        line-height: 1;
-        margin-bottom: 4px;
-    }
-
-    .metric-subtle {
-        font-size: 14px;
-        color: rgba(255, 255, 255, 0.82);
-    }
-
-    .metric-weather .metric-body {
-        justify-content: space-between;
-        text-align: left;
-    }
-
-    .report-hero .metrics-grid {
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: 16px;
-        margin-bottom: 24px;
-    }
-
-    .report-hero .metric-card {
-        min-height: 122px;
-        padding: 0;
-        overflow: hidden;
-        background: #103a57;
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-    }
-
-    .report-hero .main-content,
-    .report-hero .bottom-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 24px;
-        margin-bottom: 24px;
-    }
-
-    .report-hero .bottom-grid.compact {
-        margin-bottom: 0;
-    }
-
-    .report-hero .panel,
-    .report-hero .compass-container {
-        background: rgba(9, 36, 56, 0.45);
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        padding: 18px;
-        height: auto;
-    }
-
-    .report-hero .cloud-profile {
-        min-height: 320px;
-        height: auto;
-        background: rgba(0, 0, 0, 0.12);
-        border-radius: 12px;
-    }
-
-    .compass-meta {
-        display: flex;
-        gap: 12px;
-        margin-top: 16px;
-    }
-
-    .compass-stat {
-        flex: 1;
-        padding: 12px 14px;
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.08);
-    }
-
-    .compass-stat span {
-        display: block;
-        font-size: 12px;
-        color: rgba(255, 255, 255, 0.7);
-        margin-bottom: 4px;
-    }
-
-    .compass-stat strong {
-        font-size: 18px;
-    }
-
-    .article-card p,
-    .facts-card p {
-        color: rgba(255, 255, 255, 0.82);
-        margin-top: 10px;
-    }
-
-    .article-card h3,
-    .facts-card h3 {
-        margin-top: 18px;
-        margin-bottom: 8px;
-        font-size: 18px;
-        font-weight: 700;
-    }
-
-    .facts-table td:first-child {
-        width: 38%;
-    }
-
-    @media (max-width: 1280px) {
-        .report-hero .metrics-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-    }
-
-    @media (max-width: 900px) {
-        .site-header,
-        .report-hero {
-            padding-left: 18px;
-            padding-right: 18px;
-        }
-
-        .report-hero .main-content,
-        .report-hero .bottom-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .report-hero .metrics-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .compass-meta {
-            flex-direction: column;
-        }
-    }
-
-    @media (max-width: 640px) {
-        .site-header {
-            flex-direction: column;
-            align-items: flex-start;
-        }
-
-        .report-hero .metrics-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .report-tabs {
-            flex-wrap: wrap;
-        }
-    }
-
-    :root {
-        --mt-page-bg: #ffffff;
-        --mt-primary: #2a6da1;
-        --mt-darkblue: #143754;
-        --mt-darkblue-2: #1b4566;
-        --mt-success: #28a745;
-        --mt-lightblue: #35a7ff;
-        --mt-danger: #dc3545;
-        --mt-purple: #6f42c1;
-        --mt-border: rgba(255, 255, 255, 0.12);
-        --mt-text-soft: rgba(255, 255, 255, 0.78);
-    }
-
-    body {
-        background: var(--mt-page-bg) !important;
-    }
-
-    .page-shell {
-        background: var(--mt-page-bg);
-    }
-
-    .site-header {
-        max-width: none;
-        background: #ffffff;
-    }
-
-    .report-hero {
-        max-width: none;
-        margin: 0;
-        border-radius: 0;
-        background: var(--mt-primary);
-        box-shadow: none;
-    }
-
-    .top-nav {
-        margin-bottom: 14px;
-    }
-
-    .nav-breadcrumb,
-    .nav-breadcrumb a {
-        color: rgba(255, 255, 255, 0.9);
-    }
-
-    .time-info,
-    .metric-card,
-    .panel,
-    .compass-container,
-    .raw-data-section,
-    .runway-option {
-        background: var(--mt-darkblue) !important;
-        border-color: var(--mt-border) !important;
-    }
-
-    .runway-option.active {
-        background: var(--mt-darkblue-2) !important;
-        border-color: rgba(255, 255, 255, 0.22) !important;
-    }
-
-    .metric-accent-soft {
-        background: var(--mt-success) !important;
-    }
-
-    .metric-accent-quiet {
-        background: var(--mt-darkblue) !important;
-    }
-
-    .metric-subtle,
-    .help-text,
-    .article-card p,
-    .facts-card p,
-    .airport-title h2,
-    .eyebrow {
-        color: var(--mt-text-soft) !important;
-    }
-
-    .cloud-profile {
-        background: transparent !important;
-        border: none !important;
-        padding: 0 !important;
-        min-height: 0 !important;
-    }
-
-    .data-table td,
-    .data-table th {
-        border-color: var(--mt-border);
-    }
-
-    .data-table td:first-child,
-    .data-table th:first-child {
-        background: rgba(255, 255, 255, 0.06);
-    }
-
-    .weather-icon {
-        filter: saturate(0.95);
-    }
   `;
   }
 
-  // 生成现代化的罗盘组件 - 固定大小
-function generateModernCompass(windDirection: number, windSpeed: number, runways: RunwayInfo[], runwayWindComponents: RunwayWindComponent[]): string {
+  // 鐢熸垚鐜颁唬鍖栫殑缃楃洏缁勪欄1�7 - 鍥哄畾澶у的1�7
+  function generateModernCompass(windDirection: number, windSpeed: number, runways: RunwayInfo[], runwayWindComponents: any[]): string {
+    if (runways.length === 0) return '';
+    
+    // 浣跨敤閫嗛鍒嗛噺鏈€澶х殑璺戦亾浣滀负绀轰緥
     const bestRunway = runwayWindComponents.length > 0 ? runwayWindComponents[0].runway : runways[0];
-    const heading = bestRunway ? (parseInt(bestRunway.leHeadingDegt) || 0) : 0;
-    const title = bestRunway
-      ? `Runway ${bestRunway.leIdent}/${bestRunway.heIdent} wind view`
-      : 'Wind direction overview';
-    const bestComponents = runwayWindComponents[0]?.components;
-    const runwaySvg = bestRunway ? `
-                        <g transform="rotate(${heading}, 150, 150)">
-                            <line x1="150" y1="40" x2="150" y2="260" 
-                                  style="stroke:#718096;stroke-width:20;stroke-linecap:round"/>
-                            <line x1="150" y1="40" x2="150" y2="260" 
-                                  style="stroke:#cbd5e0;stroke-width:2;stroke-dasharray:10,5;stroke-linecap:round"/>
-                            <text x="150" y="30" text-anchor="middle" font-size="23" fill="#fff" font-weight="bold">${bestRunway.leIdent}</text>
-                            <text x="150" y="280" text-anchor="middle" font-size="23" fill="#fff" font-weight="bold">${bestRunway.heIdent}</text>
-                        </g>
-    ` : '';
+    const heading = parseInt(bestRunway.leHeadingDegt) || 0;
+    
+    const windCompassBackground = getWindCompassBackground();
     
     return `
     <div class="compass-container">
-        <h3>${title}</h3>
+        <h3>璺戦亄1�7 ${bestRunway.leIdent}/${bestRunway.heIdent} 椋庡悜绀烘剰鍄1�7?/h3>
         <div class="compass-and-wind">
             <div class="compass-section">
                 <div class="compass-wrapper">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" class="compass-svg">
+                    <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 300 300" class="compass-svg">
                         <defs>
                             <radialGradient id="compass_bg" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
                                 <stop offset="0%" style="stop-color:rgb(240,240,240); stop-opacity:0.8"/>
@@ -2266,24 +1700,46 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
                             </radialGradient>
                         </defs>
                         
-                        <!-- 背景圆和刻度 -->
+                        <!-- 鑳屾櫙鍦嗗拰鍒诲宄1�7 -->
                         <circle cx="150" cy="150" r="145" fill="#2a6da1" stroke="#ffffff" stroke-width="2" opacity="0.8"/>
                         <circle cx="150" cy="150" r="125" fill="#f7fafc" stroke="#e2e8f0" stroke-width="1" style="fill:url(#compass_bg)"/>
+                        ${windCompassBackground ?? ''}
                         
-                        <!-- 方向刻度 -->
-                        ${generateDirectionTicks()}
+                        <!-- 鏂瑰悜鍒诲害 -->
+                        ${windCompassBackground ? '' : generateDirectionTicks()}
                         
-                        ${runwaySvg}
+                        <!-- 璺戦亾绾挎潯 - 浣跨敤涓巖unway-selector鐩稿悓鐨勬牸寄1�7?-->
+                        <g transform="rotate(${heading}, 150, 150)">
+                            <!-- 璺戦亾涓讳綋 -->
+                            <line x1="150" y1="40" x2="150" y2="260" 
+                                  style="stroke:#718096;stroke-width:20;stroke-linecap:round"/>
+                            <!-- 璺戦亾涓績组1�7?-->
+                            <line x1="150" y1="40" x2="150" y2="260" 
+                                  style="stroke:#cbd5e0;stroke-width:2;stroke-dasharray:10,5;stroke-linecap:round"/>
+                            <!-- 璺戦亾缂栧彿 -->
+                            <text x="150" y="30" text-anchor="middle" font-size="23" fill="#fff" font-weight="bold">${bestRunway.leIdent}</text>
+                            <text x="150" y="280" text-anchor="middle" font-size="23" fill="#fff" font-weight="bold">${bestRunway.heIdent}</text>
+                        </g>
                         
-                        <!-- 风向箭头 - 修复旋转中心 -->
+                        <!-- 椋庡悜绠ご - 淇鏃嬭浆涓縄1�7 -->
                         <g transform="rotate(${windDirection}, 150, 150)">
                             <line x1="150" y1="150" x2="150" y2="40" stroke="#e53e3e" stroke-width="3"/>
                             <path d="M150 40 L145 30 L155 30 Z" fill="#e53e3e"/>
                         </g>
                         
-                        <!-- 中心点 -->
+                        <!-- 涓績鐐?-->
                         <circle cx="150" cy="150" r="3" fill="#e53e3e"/>
                     </svg>
+                </div>
+                <div class="wind-info">
+                    <div style="display: inline-block; margin: 0 15px;">
+                        <span style="font-size: 11px; opacity: 0.8;">椋庡悄1�7</span>
+                        <div style="font-size: 14px; font-weight: 600;">${windDirection}掄1�7</div>
+                    </div>
+                    <div style="display: inline-block; margin: 0 15px;">
+                        <span style="font-size: 11px; opacity: 0.8;">椋庨₄1�7?/span>
+                        <div style="font-size: 14px; font-weight: 600;">${windSpeed} kt</div>
+                    </div>
                 </div>
             </div>
             
@@ -2291,24 +1747,10 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
                 ${generateWindSpeedIndicator(windSpeed)}
             </div>
         </div>
-        <div class="compass-meta">
-            <div class="compass-stat">
-                <span>Wind direction</span>
-                <strong>${windDirection}°</strong>
-            </div>
-            <div class="compass-stat">
-                <span>Wind speed</span>
-                <strong>${windSpeed} kt</strong>
-            </div>
-            <div class="compass-stat">
-                <span>Head / Crosswind</span>
-                <strong>${bestComponents ? `${bestComponents.headwind.toFixed(1)} / ${bestComponents.crosswind.toFixed(1)} kt` : 'N/A'}</strong>
-            </div>
-        </div>
     </div>`;
   }
 
-  // 生成方向刻度
+  // 鐢熸垚鏂瑰悜鍒诲宄1�7
   function generateDirectionTicks(): string {
     let directionTicks = '';
     for (let i = 0; i < 36; i++) {
@@ -2341,32 +1783,32 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
     return directionTicks;
   }
 
-  // 生成风速指示器
+  // 鐢熸垚椋庨€熸寚绢�哄櫒
   function generateWindSpeedIndicator(windSpeed: number): string {
-    // 计算指针旋转角度 (0-45kt对应0-270度)
+    // 璁＄畻鎸囬拡鏃嬭浆瑙掑害 (0-45kt瀵瑰簄1�70-270搄1�7?
     const maxSpeed = 45;
     const rotation = Math.min(windSpeed, maxSpeed) / maxSpeed * 270;
     
     return `
     <div class="wind-speed-container">
-        <h4>风速指示器</h4>
+        <h4>椋庨€熸寚绀哄櫒</h4>
         <div class="wind-speed-gauge">
-            <!-- 风速表盘 -->
+            <!-- 椋庨€熻〃鐩?-->
             <svg xmlns="http://www.w3.org/2000/svg" enable-background="new" version="1.1" viewBox="0 0 539.97 299.99" class="wind-speed-dial"><path d="m470.76 1.2116 1.0566 12.189a137.28 137.28 0 0 1 0.0215-2e-3zm-25.641 4.5293 3.1289 11.711a137.28 137.28 0 0 1 0.0176-0.0078zm-24.469 8.9102 5.1504 11.059a137.28 137.28 0 0 1 0.0176-0.0059zm-22.547 13.021 7.0234 10.047a137.28 137.28 0 0 1 0.0176-0.01367zm-19.953 16.738 8.6406 8.6543a137.28 137.28 0 0 1 0.0137-0.01563zm-16.721 19.949 9.9141 6.9551a137.28 137.28 0 0 1 0.0117-0.02148zm-13.014 22.551 11.062 5.1699a137.28 137.28 0 0 1 0.01-0.01953zm-8.8965 24.473 11.842 3.1797a137.28 137.28 0 0 1 6e-3 -0.0215zm-4.5215 25.639 12.121 1.0684a137.28 137.28 0 0 1 2e-3 -0.0215zm12.188 24.959-12.188 1.0801 12.189-1.0566a137.28 137.28 0 0 1-2e-3 -0.0234zm4.0527 23.57-11.709 3.1523 11.715-3.1309a137.28 137.28 0 0 1-6e-3 -0.0215zm8.2656 22.449-11.049 5.168 11.061-5.1465a137.28 137.28 0 0 1-0.0117-0.0215zm11.998 20.672-10.031 7.041 10.043-7.0234a137.28 137.28 0 0 1-0.0117-0.0176zm15.34 18.328-8.6328 8.6562 8.6484-8.6426a137.28 137.28 0 0 1-0.0137-0.0137zm18.25 15.465-6.9356 9.9258 6.9551-9.916a137.28 137.28 0 0 1-0.0195-0.01zm20.762 11.869-5.1445 11.068 5.1641-11.059a137.28 137.28 0 0 1-0.0195-0.01zm22.48 8.127-3.1602 11.844 3.1797-11.842a137.28 137.28 0 0 1-0.0195-2e-3zm23.551 4.2363a137.28 137.28 0 0 1-0.0215 2e-3l-1.0469 12.123z" fill="#fffbfb" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-opacity=".19854"/><path d="m483.78 0.62566-0.0137 16.553a132.85 132.85 0 0 1 0.0312-2e-3zm-25.939 2.2734 2.877 16.379a132.85 132.85 0 0 1 0.0274-0.0039zm-25.15 6.7422 5.6953 15.684a132.85 132.85 0 0 1 0.0312-0.01172zm-23.598 11.01 8.3184 14.43a132.85 132.85 0 0 1 0.0293-0.01563zm-21.33 14.938 10.625 12.676a132.85 132.85 0 0 1 0.0215-0.01758zm-18.412 18.412 12.736 10.705a132.85 132.85 0 0 1 0.0176-0.02344zm-14.93 21.332 14.445 8.3516a132.85 132.85 0 0 1 0.0137-0.02539zm-10.982 23.598 15.594 5.6895a132.85 132.85 0 0 1 8e-3 -0.0293zm-6.7324 25.154 16.408 2.9023a132.85 132.85 0 0 1 6e-3 -0.0273zm14.271 25.92-16.551 0.0176 16.555 0.01a132.85 132.85 0 0 1-4e-3 -0.0273zm2.0879 23.045-16.371 2.9082 16.377-2.875a132.85 132.85 0 0 1-6e-3 -0.0332zm6.043 22.336-15.672 5.7207 15.684-5.6953a132.85 132.85 0 0 1-0.0117-0.0254zm9.752 20.973-14.414 8.3418 14.432-8.3184a132.85 132.85 0 0 1-0.0176-0.0234zm13.182 19.023-12.658 10.645 12.678-10.623a132.85 132.85 0 0 1-0.0195-0.0215zm16.436 16.295-10.682 12.756 10.701-12.736a132.85 132.85 0 0 1-0.0195-0.0195zm18.975 13.227-8.3262 14.459 8.3516-14.447a132.85 132.85 0 0 1-0.0254-0.0117zm20.936 9.8555-5.6621 15.605 5.6914-15.598a132.85 132.85 0 0 1-0.0293-8e-3zm22.365 5.9277-2.877 16.408 2.9062-16.402a132.85 132.85 0 0 1-0.0293-6e-3zm23.072 2.1211a132.85 132.85 0 0 1-0.0273 6e-3l0.0176 16.551z" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-opacity=".19731"/><g fill="#fff" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="0px" stroke-width="6.0619" word-spacing="0px"><g fill-opacity=".50458"><g font-size="32.33px"><text transform="rotate(-.85)" x="387.58875" y="112.16953" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="387.58875" y="112.16953" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" stroke-width="6.0619" text-align="center" text-anchor="middle">30</tspan></text><text transform="rotate(-.57)" x="393.76328" y="256.12094" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="393.76328" y="256.12094" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-4.196px" stroke-width="6.0619">10</tspan></text><text transform="rotate(-.63)" x="354.72375" y="186.40331" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="354.72375" y="186.40331" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-.94348px" stroke-width="6.0619">20</tspan></text><text transform="rotate(1.956)" x="429.66553" y="39.435848" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="429.66553" y="39.435848" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-1.6883px" stroke-width="6.0619">40</tspan></text><text transform="rotate(-.57)" x="471.66229" y="282.04977" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="471.66229" y="282.04977" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-4.196px" stroke-width="6.0619">0</tspan></text></g><g font-size="20.5px"><text transform="rotate(-.57)" x="434.14883" y="273.78049" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="434.14883" y="273.78049" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">5</tspan></text><text transform="rotate(-.57)" x="368.87915" y="223.67068" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="368.87915" y="223.67068" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">15</tspan></text><text transform="rotate(-.57)" x="356.20081" y="140.87766" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="356.20081" y="140.87766" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">25</tspan></text><text transform="rotate(-.57)" x="397.78909" y="71.381081" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="397.78909" y="71.381081" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">35</tspan></text><text transform="rotate(-.57)" x="474.15717" y="42.222847" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="474.15717" y="42.222847" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">45</tspan></text></g></g><text transform="rotate(.49611)" x="513.96155" y="86.496727" enable-background="new" fill-opacity=".50087" font-size="25.105px" text-align="end" text-anchor="end" style="line-height:1.25" xml:space="preserve"><tspan x="494.27924" y="86.496727" fill="#ffffff" fill-opacity=".50087" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" stroke-width="6.0619" text-align="end" text-anchor="end">kt</tspan></text></g></svg>
             
-            <!-- 风速指针 - 修复位置问题，将指针圆点固定在右侧中心 -->
-            <div class="wind-speed-pointer" style="--rotation: ${rotation}deg;">
+            <!-- 椋庨€熸寚閽?- 淇浣嶇疆闂锛屽皢鎸囬拡鍦嗙偣鍥哄畾鍦ㄥ彸渚т腑蹄1�7?-->
+            <div class="wind-speed-pointer" style="transform: rotate(${rotation}deg);">
                 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" enable-background="new" version="1.1" viewBox="0 0 299.2 299.2" class="wind-pointer"><defs><filter id="filter2127" x="-.00055999" y="-.00052769" width="1.0179" height="1.0169" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/><feGaussianBlur in="composite1" result="blur" stdDeviation="0.0013910235"/><feOffset dx="0.1" dy="0.1" result="offset"/><feComposite in="SourceGraphic" in2="offset" result="composite2"/></filter><filter id="filter2115" x="-.1403" y="-.13221" width="1.3098" height="1.292" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="out" result="composite1"/><feGaussianBlur in="composite1" result="blur" stdDeviation="0.2"/><feOffset dx="0.1" dy="0.1" result="offset"/><feComposite in="offset" in2="SourceGraphic" operator="atop" result="composite2"/></filter><filter id="filter1350" x="-.21917" y="-.024537" width="1.4916" height="1.055" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/><feGaussianBlur in="composite1" result="blur" stdDeviation="1.2"/><feOffset dx="0.7" dy="0.7" result="offset"/><feComposite in="SourceGraphic" in2="offset" result="composite2"/></filter><filter id="filter1362" x="-.14724" y="-.061731" width="1.3303" height="1.1385" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/><feGaussianBlur in="composite1" result="blur" stdDeviation="1.2"/><feOffset dx="0.7" dy="0.7" result="offset"/><feComposite in="SourceGraphic" in2="offset" result="composite2"/></filter></defs><path d="m143.07 147.7 0.15234 99.02 6.543 18.352 6.4453-18.385-0.13476-98.986z" fill="#fff" filter="url(#filter1350)"/><path d="m149.51 101.24a9.7799 9.7799 0 0 0-9.6699 9.7793 9.7799 9.7799 0 0 0 3.4219 7.4316v29.443h12.691l0.084-29.494a9.7799 9.7799 0 0 0 3.3633-7.3809 9.7799 9.7799 0 0 0-9.7793-9.7793 9.7799 9.7799 0 0 0-0.11133 0z" fill="#262626" filter="url(#filter1362)"/><text x="-247.21579" y="119.75312" fill="#ffffff" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="19.863px" font-weight="300" letter-spacing="0px" stroke-width="2.4828" word-spacing="0px" style="line-height:1.25" xml:space="preserve"><tspan x="-247.21579" y="138.13974" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="13.242px" font-weight="300" stroke-width="2.4828" style="line-height:0"/></text><g transform="translate(-446.92 140.23)" opacity=".99"><text x="13.86202" y="253.8631" fill="#000000" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="5.3333px" font-weight="300" letter-spacing="0px" word-spacing="0px" style="line-height:1.25" xml:space="preserve"><tspan x="13.86202" y="258.80008"/></text></g><ellipse transform="matrix(-3.1841 .0099951 -.0099951 -3.1841 414.71 466.99)" cx="82.948" cy="99.94" rx="2.9808" ry="3.1633" enable-background="new" fill="#262626" filter="url(#filter2127)"/><ellipse transform="matrix(-3.1841 .0099951 -.0099951 -3.1841 414.71 466.99)" cx="82.948" cy="99.94" rx="1.7106" ry="1.8153" enable-background="new" fill="#262626" filter="url(#filter2115)"/></svg>
             </div>
         </div>
         <div class="wind-speed-value">
-            当前风速: <strong>${windSpeed} kt</strong>
+            褰撳墠椋庨€? <strong>${windSpeed} kt</strong>
         </div>
     </div>`;
   }
 
-  // 生成现代化的跑道选择器 - 按逆风优先排序
-  function generateModernRunwaySelector(runways: RunwayInfo[], runwayWindComponents: RunwayWindComponent[]): string {
+  // 鐢熸垚鐜颁唬鍖栫殑璺戦亾閫夋嫨鍣?- 鎸夐€嗛浼樺厛鎺掑簄1�7
+  function generateModernRunwaySelector(runways: RunwayInfo[], runwayWindComponents: any[]): string {
     if (runways.length === 0) return '';
     
     return `
@@ -2380,32 +1822,26 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
                   <div class="runway-svg">
                       ${generateRunaySVG(runway.leIdent, runway.heIdent)}
                   </div>
-                  <div class="help-text">顶风: ${components.headwind.toFixed(1)} kt</div>
-                  <div class="help-text">侧风: ${components.crosswind.toFixed(1)} kt</div>
+                  <div class="help-text">椤堕1�7: ${components.headwind.toFixed(1)} kt</div>
+                  <div class="help-text">渚ч: ${components.crosswind.toFixed(1)} kt</div>
               </div>
             `;
           }).join('')}
       </div>`;
   }
 
-  // 跑道SVG生成函数
+  // 璺戦亾SVG鐢熸垚鍑芥暟
   function generateRunaySVG(leIdent: string, heIdent: string): string {
-    // 跑道尺寸参数
-    const runwayLength = 480; // 跑道长度（垂直方向）
-    const runwayWidth = 65;   // 跑道宽度（水平方向）
-    const centerLineWidth = 4; // 中心线宽度
-    const centerLineLength = 10; // 中心线每段长度
-    const centerLineGap = 8; // 中心线间隔
-    const thresholdLineWidth = 6; // 跑道入口线宽度（竖线）
-    const thresholdLineLength = 20; // 跑道入口线长度
-    const thresholdLineSpacing = 8; // 跑道入口线间距
-    const fontSize = 16; // 跑道编号字体大小
+    // 璺戦亾灏哄鍙傛暄1�7
+    const runwayLength = 480; // 璺戦亾闀垮害锛堝瀭鐩存柟鍚戯約1�7
+    const runwayWidth = 65;   // 璺戦亾��藉害锛堟按骞虫柟鍚戯級
+    const centerLineWidth = 4; // 涓績绾垮搄1�7?    const centerLineLength = 10; // 涓績绾挎瘡娈甸暱搴?    const centerLineGap = 8; // 涓績绾块棿闄1�7?    const thresholdLineWidth = 6; // 璺戦亾鍏ュ彛绾垮搴︼紙绔栫嚎锛?    const thresholdLineLength = 20; // 璺戦亾鍏ュ彛绾块暱搴?    const thresholdLineSpacing = 8; // 璺戦亾鍏ュ彛绾块棿璺?    const fontSize = 16; // 璺戦亾缂栧彿瀛椾綋澶у的1�7
     
-    // SVG尺寸
+    // SVG灏哄1�7
     const svgWidth = 230;
     const svgHeight = 530;
     
-    // 计算居中位置
+    // 璁＄畻灞呬腑浣嶇疄1�7
     const centerX = svgWidth / 2 - 55;
     const centerY = svgHeight / 2;
     const runwayStartY = centerY - runwayLength / 2;
@@ -2415,21 +1851,21 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
     
     return `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgWidth} ${svgHeight}" width="${svgWidth}" height="${svgHeight}">
-          <!-- 跑道主体 -->
+          <!-- 璺戦亾涓讳綋 -->
           <rect x="${runwayStartX}" y="${runwayStartY}" 
                 width="${runwayWidth}" height="${runwayLength}" 
                 fill="#2a6da1" stroke="#fff" stroke-width="1"/>
           
-          <!-- 跑道中心线 -->
+          <!-- 璺戦亾涓績组1�7?-->
           ${generateCenterLine(centerX, runwayStartY, runwayEndY -35, centerLineWidth, centerLineLength, centerLineGap)}
           
-          <!-- 跑道入口标志线 - 顶部（竖线） -->
+          <!-- 璺戦亾鍏ュ彛鏍囧織绾?- 椤堕儴锛堢珫绾匡約1�7 -->
           ${generateThresholdLines(runwayStartX, runwayStartY, runwayWidth, thresholdLineWidth, thresholdLineLength, thresholdLineSpacing)}
           
-          <!-- 跑道入口标志线 - 底部（竖线） -->
+          <!-- 璺戦亾鍏ュ彛鏍囧織绾?- 搴曢儴锛堢珫绾匡約1�7 -->
           ${generateThresholdLines(runwayStartX, runwayEndY - thresholdLineLength, runwayWidth, thresholdLineWidth, thresholdLineLength, thresholdLineSpacing)}
           
-          <!-- 跑道编号 - 顶部（在入口线上方） -->
+          <!-- 璺戦亾缂栧彿 - 椤堕儴锛堝湪鍏ュ彛绾夸笂鏂癸約1�7 -->
           <text x="${centerX}" y="${runwayStartY + 35}" 
                 text-anchor="middle" dominant-baseline="middle"
                 font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
@@ -2437,7 +1873,7 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
               ${leIdent}
           </text>
           
-          <!-- 跑道编号 - 底部（在入口线上方） -->
+          <!-- 璺戦亾缂栧彿 - 搴曢儴锛堝湪鍏ュ彛绾夸笂鏂癸約1�7 -->
           <text x="${centerX}" y="${runwayEndY - 35}" 
                 text-anchor="middle" dominant-baseline="middle"
                 font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
@@ -2447,8 +1883,7 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
       </svg>`;
   }
 
-  // 生成跑道中心线
-  function generateCenterLine(centerX: number, startY: number, endY: number, lineWidth: number, lineLength: number, gap: number): string {
+  // 鐢熸垚璺戦亾涓績绾?  function generateCenterLine(centerX: number, startY: number, endY: number, lineWidth: number, lineLength: number, gap: number): string {
     let lines = '';
     let y = startY + gap + 35;
     
@@ -2461,8 +1896,7 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
     return lines;
   }
 
-  // 生成跑道入口标志线（竖线）
-  function generateThresholdLines(startX: number, y: number, runwayWidth: number, lineWidth: number, lineLength: number, spacing: number): string {
+  // 鐢熸垚璺戦亾鍏ュ彛鏍囧織绾匡紙绔栫嚎锄1�7?  function generateThresholdLines(startX: number, y: number, runwayWidth: number, lineWidth: number, lineLength: number, spacing: number): string {
     let lines = '';
     const lineCount = Math.floor(runwayWidth / (lineWidth + spacing));
     const totalWidth = (lineWidth * lineCount) + (spacing * (lineCount - 1));
@@ -2477,7 +1911,7 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
     return lines;
   }
 
-  // 生成现代化的云层剖面图 - 固定大小
+  // 鐢熸垚鐜颁唬鍖栫殑浜戝眰鍓栭潰鍥?- 鍥哄畾澶у的1�7
   function generateModernCloudProfile(clouds: any[], config: Config): string {
     const cloudCondition = getCloudCondition(clouds, config);
     
@@ -2508,10 +1942,9 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
     </div>`;
   }
 
-  // 获取云层状态描述 - 使用映射表翻译
-  function getCloudCondition(clouds: any[], config: Config): string {
+  // 鑾峰彇浜戝眰鐘舵€佹弿杩?- 浣跨敤鏄犲皠琛ㄧ炕璇?  function getCloudCondition(clouds: any[], config: Config): string {
     if (clouds.length === 0) {
-      return config.cloudCoverageMap.find(item => item.code === 'NSC')?.description || "无显著云层";
+      return config.cloudCoverageMap.find(item => item.code === 'NSC')?.description || "鏃犳樉钁椾簯灄1�7?;
     }
     
     const hasOvercast = clouds.some(c => c.type === 'OVC');
@@ -2519,58 +1952,67 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
     const hasScattered = clouds.some(c => c.type === 'SCT');
     const hasFew = clouds.some(c => c.type === 'FEW');
     
-    if (hasOvercast) return config.cloudCoverageMap.find(item => item.code === 'OVC')?.description || "满天云";
-    if (hasBroken) return config.cloudCoverageMap.find(item => item.code === 'BKN')?.description || "多云";
-    if (hasScattered) return config.cloudCoverageMap.find(item => item.code === 'SCT')?.description || "疏云";
-    if (hasFew) return config.cloudCoverageMap.find(item => item.code === 'FEW')?.description || "少云";
+    if (hasOvercast) return config.cloudCoverageMap.find(item => item.code === 'OVC')?.description || "婊��ぉ浄1�7?;
+    if (hasBroken) return config.cloudCoverageMap.find(item => item.code === 'BKN')?.description || "澶氫簄1�7";
+    if (hasScattered) return config.cloudCoverageMap.find(item => item.code === 'SCT')?.description || "鐤忎簄1�7";
+    if (hasFew) return config.cloudCoverageMap.find(item => item.code === 'FEW')?.description || "灏戜簄1�7";
     
-    return "有云";
+    return "鏈変簄1�7";
   }
 
-  // 现代化的天气图标获取 - 使用映射表翻译
-  function getModernWeatherIcon(weather: string[], clouds: any[], config: Config): string {
-    // 首先检查是否有特殊天气现象
-    if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('雷暴'))) {
-      return '⛈️';
-    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('雨'))) {
-      return '🌧️';
-    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('雪'))) {
-      return '❄️';
-    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('雾'))) {
-      return '🌫️';
+  // 鐜颁唬鍖栫殑澶╂皵鍥炬爣鑾峰彄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function getModernWeatherIcon(weather: string[], clouds: any[], config: Config): string {
+    // 棣栧厛妫€鏌ユ槸鍚︽湁鐗规畩澶╂皵鐜拌薄
+    if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('闆锋毄1�7'))) {
+      return '鉢�堬笍';
+    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('闄1�7?))) {
+      return '馃導锄1�7?;
+    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('闄1�7?))) {
+      return '鉂勶笄1�7';
+    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('闄1�7?))) {
+      return '馃尗锄1�7?;
     }
     
-    // 然后根据云量决定
+    // 鐒跺悗鏍规嵁浜戦噺鍐冲畾
     if (clouds.some(c => c.type === 'OVC')) {
-      return '☁️';
+      return '鈽侊笄1�7';
     } else if (clouds.some(c => c.type === 'BKN')) {
-      return '🌤️';
+      return '馃尋锄1�7?;
     } else if (clouds.some(c => c.type === 'SCT') || clouds.some(c => c.type === 'FEW')) {
-      return '⛅';
+      return '鉢�?;
     } else {
-      return '☀️';
+      return '鈽€锄1�7?;
     }
   }
 
-  // 现代化的观测文本生成 - 使用映射表翻译
-  function generateModernObservationText(parsedMETAR: ParsedMETAR, humidity: string, config: Config): string {
-    const windSpeed = getWindSpeedInKnots(parsedMETAR);
-    const windText = parsedMETAR.windDirection === 'VRB'
-      ? `风向不定，风速 ${windSpeed} kt`
-      : `风向 ${parsedMETAR.windDirection}°，风速 ${windSpeed} kt`;
-    const cloudText = getCloudSummaryText(parsedMETAR.clouds, config);
-    const weatherText = getWeatherDescription(parsedMETAR.weather, config);
+  // 鐜颁唬鍖栫殑瑙傛祴鏂囨湰鐢熸垄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function generateModernObservationText(parsedMETAR: ParsedMETAR, humidity: string, config: Config): string {
+    const windText = parsedMETAR.windDirection === 'VRB' ? 
+      `椋庡悜澶氬彉锛岄閫?${parsedMETAR.windSpeed} ${parsedMETAR.windUnit}` :
+      `椋庡悄1�7 ${parsedMETAR.windDirection}掳锛岄閄1�7?${parsedMETAR.windSpeed} ${parsedMETAR.windUnit}`;
+    
+    // 缈昏瘧浜戝眰
+    const cloudDescriptions = parsedMETAR.clouds.map(cloud => {
+      const cloudDesc = config.cloudCoverageMap.find(item => item.code === cloud.type)?.description || cloud.type;
+      return `${cloudDesc} ${cloud.height}鑻卞昂`;
+    });
+    const cloudText = cloudDescriptions.length > 0 ? `浜戦噺锛?{cloudDescriptions.join('锄1�7?)}` : '鏃犳樉钁椾簯灄1�7?;
 
-    return `${windText}。能见度 ${formatVisibilityDisplay(parsedMETAR.visibility)}。云况 ${cloudText}。天气现象 ${weatherText}。温度 ${parsedMETAR.temperature} °C，露点 ${parsedMETAR.dewpoint} °C，相对湿度 ${humidity}%，海平面气压 ${parsedMETAR.pressure} ${parsedMETAR.pressureUnit}。`;
+    // 缈昏瘧澶╂皵鐜拌薄1�7
+    const weatherDescriptions = parsedMETAR.weather.map(code => {
+      return config.weatherMap.find(item => item.code === code)?.description || code;
+    });
+    const weatherText = weatherDescriptions.length > 0 ? `澶╂皵鐜拌薄锄1�7?{weatherDescriptions.join('锄1�7?)}` : '';
+
+    return `
+    椋庡悄1�7 ${windText}銄1�7?    鑳��搄1�7?${parsedMETAR.visibility} 绫炽₄1�7?    ${cloudText}銄1�7?    ${weatherText}
+    娓╁害鍜岄瀵掓寚鏁颁负 ${parsedMETAR.temperature} 掳C銄1�7?    闇茬偣娓╁害涄1�7?${parsedMETAR.dewpoint} 掳C锛岀浉��规箍搴︿负 ${humidity}%銄1�7?    娴峰钩闈㈡皵鍘嬩贄1�7 ${parsedMETAR.pressure} ${parsedMETAR.pressureUnit}銄1�7?  `.replace(/\s+/g, ' ').trim();
   }
 
-  // 生成现代化的云层信息 - 使用映射表翻译
-  function generateModernCloudInfo(clouds: any[], config: Config): string {
+  // 鐢熸垚鐜颁唬鍖栫殑浜戝眰淇℃伄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function generateModernCloudInfo(clouds: any[], config: Config): string {
     if (clouds.length === 0) {
-      const noCloudDescription = config.cloudCoverageMap.find(item => item.code === 'NSC')?.description || '无显著云层';
+      const noCloudDescription = config.cloudCoverageMap.find(item => item.code === 'NSC')?.description || '鏃犳樉钁椾簯灄1�7?;
       return `
-      <div class="cloud-section panel">
-        <h2>云层</h2>
+      <div class="cloud-section">
+        <h2>浜戝眄1�7</h2>
         <table class="data-table">
             <tr>
                 <td>${noCloudDescription}</td>
@@ -2582,8 +2024,8 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
     }
     
     return `
-    <div class="cloud-section panel">
-        <h2>云层</h2>
+    <div class="cloud-section">
+        <h2>浜戝眄1�7</h2>
         <table class="data-table">
             ${clouds.map(cloud => {
               const description = config.cloudCoverageMap.find(item => item.code === cloud.type)?.description || cloud.type;
@@ -2599,31 +2041,31 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
     </div>`;
   }
 
-  // 生成现代化的跑道表格
-  function generateModernRunwayTable(runwayWindComponents: RunwayWindComponent[]): string {
+  // 鐢熸垚鐜颁唬鍖栫殑璺戦亾琛ㄦ牄1�7
+  function generateModernRunwayTable(runwayWindComponents: any[]): string {
     if (runwayWindComponents.length === 0) return '';
     
     return `
-    <div class="runway-section panel">
-        <h2>跑道</h2>
+    <div class="runway-section">
+        <h2>璺戦亄1�7</h2>
         <div style="overflow-x: auto;">
             <table class="data-table">
                 <tr>
-                    <td><strong>编号</strong></td>
-                    <td><strong>航向</strong></td>
-                    <td><strong>侧风</strong></td>
-                    <td><strong>顶风</strong></td>
-                    <td><strong>侧风百分比</strong></td>
+                    <td><strong>缂栧彄1�7</strong></td>
+                    <td><strong>鑸悄1�7</strong></td>
+                    <td><strong>渚ч</strong></td>
+                    <td><strong>椤堕1�7</strong></td>
+                    <td><strong>渚ч鐧惧垎姣?/strong></td>
                 </tr>
                 ${runwayWindComponents.map(item => {
                   const runway = item.runway;
                   const components = item.components;
-                  const crosswindPercent = Math.round((components.crosswind / (Math.abs(components.headwind) || 1)) * 100);
+                  const crosswindPercent = Math.round((components.crosswind / (parseInt(components.headwind) || 1)) * 100);
                   
                   return `
                     <tr>
                         <td><strong>${runway.leIdent}/${runway.heIdent}</strong></td>
-                        <td>${runway.leHeadingDegt}°-${runway.heHeadingDegt}°</td>
+                        <td>${runway.leHeadingDegt}掄1�7-${runway.heHeadingDegt}掄1�7</td>
                         <td>${components.crosswind.toFixed(1)} kt</td>
                         <td>${components.headwind.toFixed(1)} kt</td>
                         <td>${crosswindPercent}%</td>
@@ -2632,101 +2074,35 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
                 }).join('')}
             </table>
         </div>
-        <p class="help-text">按逆风分量排序，最大顶风分量的跑道已高亮显示，用于侧风计算。</p>
+        <p class="help-text">鎸夐€嗛鍒嗛噺鎺掑簭锛屾渶澶ч��椋庡垎閲忕殑璺戦亾宸查珮浜樉绢�猴紝鐢ㄤ簬渚ч璁＄畻銄1�7?/p>
     </div>`;
   }
 
-  function generateReferenceArticleSection(
-    icao: string,
-    airportName: string,
-    airportInfo: AirportInfo | null,
-    parsedMETAR: ParsedMETAR,
-    runways: RunwayInfo[],
-    humidity: string,
-    sunTimes: SunTimes | null,
-    countryName: string,
-    firRegion: string,
-    config: Config
-  ): string {
-    const runwayCount = getAirportRunwayCount(runways);
-    const locationText = getAirportLocationText(airportInfo, countryName);
-    const runwayText = runwayCount ? `${runwayCount} 条跑道` : '跑道信息暂缺';
-    const coordinateText = airportInfo ? `${airportInfo.latitudeDeg.toFixed(4)}, ${airportInfo.longitudeDeg.toFixed(4)}` : '未知';
-    const cloudSummary = getCloudSummaryText(parsedMETAR.clouds, config);
-
-    return `
-    <section class="article-card panel">
-        <h2>METAR ${airportName} - ${icao}</h2>
-        <p>${airportName} 位于 ${locationText}，坐标 ${coordinateText}。当前机场所属情报区为 ${firRegion}，已识别 ${runwayText}。</p>
-        <h3>机场观测</h3>
-        <p>${generateModernObservationText(parsedMETAR, humidity, config)}</p>
-        <h3>云与天气</h3>
-        <p>当前云况为 ${cloudSummary}，飞行规则判定可结合上方指标卡快速查看。</p>
-        ${sunTimes ? `<h3>昼夜时段</h3><p>今日日出 ${sunTimes.sunrise}，日落 ${sunTimes.sunset}。该时间基于机场位置估算，用于辅助判断光照条件。</p>` : ''}
-    </section>`;
-  }
-
-  function generateSupplementalFactsSection(parsedMETAR: ParsedMETAR, humidity: string, sunTimes: SunTimes | null, config: Config): string {
-    return `
-    <section class="facts-card panel">
-        <h2>Weather Facts</h2>
-        <table class="data-table facts-table">
-            <tr>
-                <td>天气现象</td>
-                <td>${getWeatherDescription(parsedMETAR.weather, config)}</td>
-            </tr>
-            <tr>
-                <td>温度</td>
-                <td>${parsedMETAR.temperature || 'N/A'} °C</td>
-            </tr>
-            <tr>
-                <td>露点</td>
-                <td>${parsedMETAR.dewpoint || 'N/A'} °C</td>
-            </tr>
-            <tr>
-                <td>相对湿度</td>
-                <td>${humidity}%</td>
-            </tr>
-            <tr>
-                <td>QNH</td>
-                <td>${parsedMETAR.pressure || 'N/A'} ${parsedMETAR.pressureUnit || 'hPa'}</td>
-            </tr>
-            ${sunTimes ? `
-            <tr>
-                <td>日出 / 日落</td>
-                <td>${sunTimes.sunrise} / ${sunTimes.sunset}</td>
-            </tr>` : ''}
-        </table>
-    </section>`;
-  }
-
-  // 获取天气描述 - 使用映射表翻译
-  function getWeatherDescription(weather: string[], config: Config): string {
-    if (weather.length === 0) return '无显著天气';
+  // 鑾峰彇澶╂皵鎻忚堄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function getWeatherDescription(weather: string[], config: Config): string {
+    if (weather.length === 0) return '鏅存湄1�7';
     const descriptions = weather.map(code => {
       const found = config.weatherMap.find(item => item.code === code);
       return found ? found.description : code;
     });
-    return descriptions.join('，') || '天气良好';
+    return descriptions.join('锄1�7?) || '澶╂皵鑹ソ';
   }
 
-  // 获取警告信息 - 使用映射表翻译
-  function getWarnings(parsedMETAR: ParsedMETAR, config: Config): string {
+  // 鑾峰彇璀﹢�憡淇℃伅 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function getWarnings(parsedMETAR: ParsedMETAR, config: Config): string {
     const warningWeather = parsedMETAR.weather.filter(w => {
       const description = config.weatherMap.find(item => item.code === w)?.description || '';
-      return description.includes('雷暴') || description.includes('风暴') || description.includes('飑线');
+      return description.includes('闆锋毄1�7') || description.includes('椋庢毄1�7') || description.includes('椋戠嚄1�7');
     });
     
     if (warningWeather.length > 0) {
       const warningDescriptions = warningWeather.map(code => {
         return config.weatherMap.find(item => item.code === code)?.description || code;
       });
-      return `有天气警告: ${warningDescriptions.join(', ')}`;
+      return `鏈夊ぉ姘旇鍄1�7? ${warningDescriptions.join(', ')}`;
     }
-    return 'No warnings';
+    return '鏃犺鍛?;
   }
 
-  // 辅助函数
+  // 杈呭姪鍑芥暟
   function calculateHumidity(temp: number, dewpoint: number): string {
     if (isNaN(temp) || isNaN(dewpoint)) return 'N/A';
     const rh = 100 * (Math.exp((17.625 * dewpoint) / (243.04 + dewpoint)) / 
@@ -2735,27 +2111,20 @@ function generateModernCompass(windDirection: number, windSpeed: number, runways
   }
 
   function getFIRRegion(icao: string): string {
-    if (icao.startsWith('ZB')) return '北京情报区';
-    if (icao.startsWith('ZH')) return '武汉情报区';
-    if (icao.startsWith('ZL')) return '兰州情报区';
-    if (icao.startsWith('ZG')) return '广州情报区';
-    if (icao.startsWith('ZS')) return '上海情报区';
-    if (icao.startsWith('ZU')) return '昆明情报区';
-    if (icao.startsWith('ZW')) return '乌鲁木齐情报区';
-    if (icao.startsWith('ZY')) return '沈阳情报区';
+    if (icao.startsWith('ZL')) return '鍏板窞鎯呮姤鍄1�7?;
+    if (icao.startsWith('ZG')) return '骞垮窞鎯呮姤鍄1�7?;
+    if (icao.startsWith('ZS')) return '涓婃捣鎯呮姤鍄1�7?;
     return 'Unknown';
   }
   
 
   function getTimeAgo(observationTime: string): string {
-    if (!observationTime) return '未知';
-    return '刚刚';
+    if (!observationTime) return '鏈煄1�7';
+    return '鍒氬垄1�7';
   }
 
   function getCeiling(clouds: any[]): string {
     const ceilingCloud = clouds.find(c => c.type === 'BKN' || c.type === 'OVC');
-    if (ceilingCloud) return `${ceilingCloud.height} ft`;
-    if (clouds.some(c => c.type === 'NSC' || c.type === 'SKC' || c.type === 'CLR')) return 'NSC';
-    return 'N/A';
+    return ceilingCloud ? ceilingCloud.height : 'None';
   }
 }
