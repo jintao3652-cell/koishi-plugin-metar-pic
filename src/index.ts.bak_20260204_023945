@@ -1,0 +1,2130 @@
+import { Context, Schema, h } from 'koishi';
+import { } from 'koishi-plugin-puppeteer';
+import axios from 'axios';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+// 绫诲瀷��氫箄1�7
+export interface AirportInfo {
+  longitudeDeg: number;
+  elevationFt: number;
+  continent: string;
+  isoRegion: string;
+  gpsCode: string;
+  ident: string;
+  municipality: string;
+  type: string;
+  latitudeDeg: number;
+  municipalityCn: string;
+  iataCode: string;
+  cnName: string;
+  enName: string;
+  isoCountry: string;
+}
+
+export interface RunwayInfo {
+  id: string;
+  airportIdent: string;
+  leIdent: string;
+  heIdent: string;
+  leHeadingDegt: string;
+  heHeadingDegt: string;
+  lengthFt: number;
+  widthFt: number;
+  surface: string;
+  lighted: string;
+  closed: string;
+  leLatitudeDeg: number;
+  leLongitudeDeg: number;
+  heLatitudeDeg: number;
+  heLongitudeDeg: number;
+  leElevationFt: string;
+  heElevationFt: string;
+}
+
+export interface ParsedMETAR {
+  station: string;
+  time: string;
+  windDirection: string;
+  windSpeed: string;
+  windGust: string;
+  windUnit: string;
+  visibility: string;
+  weather: string[];
+  temperature: string;
+  dewpoint: string;
+  pressure: string;
+  pressureUnit: string;
+  clouds: Array<{
+    type: string;
+    height: string;
+  }>;
+  raw: string;
+}
+
+export interface SunTimes {
+  sunrise: string;
+  sunset: string;
+}
+
+export interface Config {
+  commandname: string;
+  commandalias: string;
+  outputMode: 'text' | 'image' | 'both';
+  imageMode: 'auto' | 'manual';
+  screenshotquality: number;
+  imageWidth?: number;
+  imageHeight?: number;
+  weatherMap: Array<{ code: string; description: string }>;
+  cloudCoverageMap: Array<{ code: string; description: string }>;
+  consoleinfo: boolean;
+  pageautoclose: boolean;
+  apihub_token: string;
+  primarySource: 'xflysim' | 'etops' | 'xbzglw'; // 鏂板涓绘皵璞℃簮閫夋嫨
+}
+
+export const Config = Schema.intersect([
+  Schema.object({
+    commandname: Schema.string().default("metar").description("娉ㄥ唽鐨勬寚浠ゅ悕绉"),
+    commandalias: Schema.string().default("姘旇薄1�7").description("娉ㄥ唽鐨勬寚浠ゅ埆鍚"),
+  }).description('鍩虹璁剧疆'),
+
+  Schema.object({
+    outputMode: Schema.union([
+      Schema.const('text', '浠呮枃��楄緭鍑?'),
+      Schema.const('image', '浠呭浘鐗囪緭鍄1�7?'),
+      Schema.const('both', '鍥剧墖鍜屾枃瀛椾竴璧疯緭鍄1�7?'),
+    ]).default('text').description('杈撳嚭鏍煎紡閫夋嫄1�7'),
+  }).description('杈撳嚭璁剧疆'),
+
+  Schema.object({
+    imageMode: Schema.union([
+      Schema.const('auto').description('鑷姩鎴浘瀵瑰簲澶у皬鐨勫厓组1�7?),
+      Schema.const('manual').description('鎵嬪姩鎸囧畾娓叉煋澶у的1�7'),
+    ]).description('娓叉煋妯″紡閫夋嫄1�7').default("auto"),
+    screenshotquality: Schema.number().default(80).min(30).max(100).role('slider').description('娓叉煋璐ㄩ噺锄1�7?锄1�7?),
+  }).description('娓叉煋璁剧疆'),
+
+  Schema.union([
+    Schema.object({
+      imageMode: Schema.const("auto"),
+    }),
+    Schema.object({
+      imageMode: Schema.const("manual").required(),
+      imageWidth: Schema.number().default(1600).description('鐢熸垚鍥剧墖鐨勫搴?),
+      imageHeight: Schema.number().default(900).description('鐢熸垚鍥剧墖鐨勯珮搴?),
+    }),
+  ]),
+
+  Schema.object({
+    primarySource: Schema.union([
+      Schema.const('xflysim').description('XFLYSIM'),
+      Schema.const('etops').description('ETOPS'),
+      Schema.const('xbzglw').description('XBZGLW'),
+    ]).default('etops').description('棣栭€夋皵璞℃暟鎹簄1�7'),
+  }).description('鏁版嵁婧愯缄1�7?),
+
+  Schema.object({
+    weatherMap: Schema.array(Schema.object({
+      code: Schema.string().required().description('澶╂皵浠ｇ爜'),
+      description: Schema.string().required().description('澶╂皵鎻忚堪'),
+    })).role('table').default([
+      { code: 'BR', description: '闄1�7? },
+      { code: 'FG', description: '闆炬垨钖勯浘' },
+      { code: 'HZ', description: '闄1�7? },
+      { code: 'FU', description: '鐑熼浄1�7' },
+      { code: 'VA', description: '鐏北鐏? },
+      { code: 'DU', description: '娌欏的1�7' },
+      { code: 'SA', description: '娄1�7? },
+      { code: 'SS', description: '灏樻毄1�7' },
+      { code: 'DS', description: '椋庢矄1�7' },
+      { code: 'SG', description: '闆矄1�7' },
+      { code: 'IC', description: '鍐版櫄1�7' },
+      { code: 'PL', description: '闄1�7? },
+      { code: 'GR', description: '鍐伴浄1�7' },
+      { code: 'GS', description: '灏忓啺闆? },
+      { code: 'UP', description: '鏈煡闄嶆按' },
+      { code: 'RA', description: '闄1�7? },
+      { code: 'DZ', description: '姣涙瘺闆? },
+      { code: 'SN', description: '闄1�7? },
+      { code: 'SQ', description: '椋戠嚄1�7' },
+      { code: 'FC', description: '椋庢毄1�7' },
+      { code: 'TS', description: '闆锋毄1�7' },
+      { code: 'MI', description: '寰瀷娌欏皹鏄1�7? },
+      { code: 'PR', description: '閮ㄥ垎鍦板尯' },
+      { code: 'BC', description: '灞€閄1�7? },
+      { code: 'DR', description: '鍚瑰姩鐨勫皹鍦熸垨闆姳' },
+      { code: 'BL', description: '椋庢毄1�7' },
+      { code: 'SH', description: '闃垫€ч檷姄1�7? },
+      { code: '+', description: '澄1�7? },
+      { code: '-', description: '灄1�7? },
+      { code: 'VCTS', description: '闄勮繎鏈夐浄鏄1�7? },
+      { code: 'VCSH', description: '闄勮繎鏈夐樀鎬ч檷姄1�7? },
+      { code: 'VCFG', description: '闄勮繎鏈夐浘' },
+    ]).description('澶╂皵鐜拌薄鏄犲皠琛?),
+    cloudCoverageMap: Schema.array(Schema.object({
+      code: Schema.string().required().description('浜戝眰浠ｇ爜'),
+      description: Schema.string().required().description('浜戝眰鎻忚堪'),
+    })).role('table').default([
+      { code: 'FEW', description: '灏戜簄1�7 (1/8 - 2/8)' },
+      { code: 'SCT', description: '鐤忎簄1�7 (3/8 - 4/8)' },
+      { code: 'BKN', description: '澶氫簄1�7 (5/8 - 7/8)' },
+      { code: 'OVC', description: '婊��ぉ浄1�7?(8/8)' },
+      { code: 'NSC', description: '鏃犳樉钁椾簯灄1�7? },
+      { code: 'SKC', description: '鏅寸┄1�7' },
+      { code: 'CLR', description: '鏅存湄1�7' },
+      { code: 'VV', description: '鍨傜洿鑳借搄1�7? },
+    ]).description('浜戝眰瑕嗙洊鏄犲皠琛?),
+  }).description('鏄犲皠琛ㄨ缄1�7?),
+
+  Schema.object({
+    apihub_token: Schema.string().description('APIHUB Token锛堢敤浜庤幏鍙栨棩鍑烘棩钢�芥椂闂达約1�7').required(),
+  }).description('API璁剧疄1�7'),
+
+  Schema.object({
+    consoleinfo: Schema.boolean().default(false).description('鏃ュ織璋冭瘯妯��紡'),
+    pageautoclose: Schema.boolean().default(true).description('鑷姩page鍏抽棄1�7'),
+  }).description('寮€鍙戣€呴€夐〄1�7'),
+]);
+
+export const name = 'metar-weather';
+export const inject = ['puppeteer'];
+
+// API閰嶇疄1�7
+interface APISource {
+  name: string;
+  metarUrl: (icao: string) => string;
+  parseMetar: (data: any) => { metar: string; taf: string };
+  tafUrl?: (icao: string) => string;
+  parseTaf?: (data: any) => string;
+}
+
+const API_SOURCES: { [key: string]: APISource } = {
+  xbzglw: {
+    name: 'xbzglw',
+    metarUrl: (icao: string) => `http://xbzglw.com/xbinfo/app/common/airrpt/query?ccccs=${icao}&type=SA&type=SP&type=FC&type=FT&hour=0`,
+    parseMetar: (data: any): { metar: string, taf: string } => {
+      const text = data.toString();
+      const lines = text.split('\n');
+      let metar = '', taf = '';
+      
+      for (const line of lines) {
+        if (line.includes('METAR')) metar = line.split('METAR')[1]?.trim() || '';
+        if (line.includes('TAF')) taf = line.split('TAF')[1]?.trim() || '';
+      }
+      
+      return { metar, taf };
+    }
+  },
+  xflysim: {
+    name: 'xflysim',
+    metarUrl: (icao: string) => `https://api.xflysim.com/pilot/api/realTimeMap/weather/${icao}`,
+    tafUrl: (icao: string) => `https://api.xflysim.com/pilot/api/realTimeMap/weatherForecast/${icao}`,
+    parseMetar: (data: any): { metar: string, taf: string } => {
+      if (data.code === 20000) {
+        return {
+          metar: data.data.metar || '',
+          taf: ''
+        };
+      }
+      return { metar: '', taf: '' };
+    },
+    parseTaf: (data: any): string => {
+      if (data.code === 20000) {
+        return data.data.taf || '';
+      }
+      return '';
+    }
+  },
+  etops: {
+    name: 'etops',
+    metarUrl: (icao: string) => `https://api.etops.top/api/v1/weather/metar/${icao}`,
+    tafUrl: (icao: string) => `https://api.etops.top/api/v1/weather/taf/${icao}`,
+    parseMetar: (data: any): { metar: string, taf: string } => {
+      if (data.code === 0) {
+        let metar = data.data.line || '';
+        if (metar.startsWith('"') && metar.endsWith('"')) {
+          metar = metar.slice(1, -1);
+        }
+        return { metar, taf: '' };
+      }
+      return { metar: '', taf: '' };
+    },
+    parseTaf: (data: any): string => {
+      if (data.code === 0) {
+        return data.data.line || '';
+      }
+      return '';
+    }
+  }
+};
+
+// 鏃ュ嚭鏃ヨ惤鏈嶅姄1�7
+class SunTimeService {
+  static async getSunTimes(lat: number, lon: number, config: Config): Promise<SunTimes | null> {
+    try {
+      const now = new Date();
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      
+      const response = await axios.post(
+        'https://open.apihub.net/api/sun-rising',
+        {
+          lon: lon,
+          lat: lat,
+          date: date
+        },
+        {
+          headers: {
+            'apihub-token': config.apihub_token,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      );
+
+      if (response.data && response.data.code === 200) {
+        return {
+          sunrise: response.data.data.sunrise,
+          sunset: response.data.data.sunset
+        };
+      }
+    } catch (error) {
+      console.error('鑾峰彇鏃ュ嚭鏃ヨ惤鏃堕棿澶辫规1�7:', error);
+    }
+    return null;
+  }
+}
+
+// 鏈哄溢�淇℃伅鏈嶅姟
+class AirportService {
+  static async getAirportInfo(icao: string): Promise<AirportInfo | null> {
+    try {
+      const response = await axios.get(`https://api.xflysim.com/pilot/api/realTimeMap/airports/${icao.toLowerCase()}`);
+      if (response.data.code === 20000) {
+        return response.data.data;
+      }
+    } catch (error) {
+      console.error('鑾峰彇鏈哄満淇℃伅澶辫触:', error);
+    }
+    return null;
+  }
+
+  static async getRunways(icao: string): Promise<RunwayInfo[]> {
+    try {
+      const response = await axios.get(`https://api.xflysim.com/pilot/api/realTimeMap/runway/${icao.toLowerCase()}`);
+      if (response.data.code === 20000) {
+        return response.data.data;
+      }
+    } catch (error) {
+      console.error('鑾峰彇璺戦亾淇℃伅澶辫触:', error);
+    }
+    return [];
+  }
+}
+
+// METAR瑙ｆ瀽鏈嶅姟 - 淇INHG璇诲彇鍜屽ぉ姘斾唬鐮佽В鏋?class METARParser {
+  static parse(metarString: string): ParsedMETAR {
+    const parsed: ParsedMETAR = {
+      station: '',
+      time: '',
+      windDirection: '',
+      windSpeed: '',
+      windGust: '',
+      windUnit: '',
+      visibility: '',
+      weather: [],
+      temperature: '',
+      dewpoint: '',
+      pressure: '',
+      pressureUnit: 'hPa',
+      clouds: [],
+      raw: metarString
+    };
+
+    if (!metarString) return parsed;
+
+    try {
+      // 鍩烘湰METAR瑙ｆ瀄1�7
+      const parts = metarString.split(' ');
+      parsed.station = parts[0];
+      
+      // 瑙ｆ瀽鏃堕棿 (DDHHMMZ)
+      const timeMatch = metarString.match(/(\d{6})Z/);
+      if (timeMatch) {
+        parsed.time = timeMatch[1];
+      }
+
+      // 瑙ｆ瀽椋?      const windMatch = metarString.match(/(\d{3}|VRB)(\d{2,3})(G(\d{2,3}))?(KT|MPS)/);
+      if (windMatch) {
+        parsed.windDirection = windMatch[1];
+        parsed.windSpeed = windMatch[2];
+        parsed.windGust = windMatch[4] || '';
+        parsed.windUnit = windMatch[5];
+      }
+
+      // 瑙ｆ瀽鑳借搄1�7?      const visMatch = metarString.match(/(\d{4})(?=\s)/);
+      if (visMatch) {
+        parsed.visibility = visMatch[1];
+      }
+
+      // 瑙ｆ瀽澶╂皵鐜拌薄1�7 - 鏢�硅繘澶╂皵浠ｇ爜瑙ｆ瀄1�7
+      const weatherCodes = ['BR', 'FG', 'HZ', 'FU', 'VA', 'DU', 'SA', 'SS', 'DS', 'SG', 'IC', 'PL', 'GR', 'GS', 'UP', 'RA', 'DZ', 'SN', 'SQ', 'FC', 'TS', 'MI', 'PR', 'BC', 'DR', 'BL', 'SH', 'VCTS', 'VCSH', 'VCFG', '\\+', '\\-'];
+      const weatherRegex = new RegExp(`\\b(${weatherCodes.join('|')})+\\b`, 'g');
+      const weatherMatches = metarString.match(weatherRegex);
+      if (weatherMatches) {
+        parsed.weather = weatherMatches;
+      }
+
+      // 瑙ｆ瀽娓╁害/闇茬偄1�7
+      const tempMatch = metarString.match(/(M?\d{2})\/(M?\d{2})/);
+      if (tempMatch) {
+        parsed.temperature = tempMatch[1].replace('M', '-');
+        parsed.dewpoint = tempMatch[2].replace('M', '-');
+      }
+
+      // 瑙ｆ瀽姘斿帇 - 淇INHG璇诲彇闂�1�7
+      const pressureMatchQNH = metarString.match(/Q(\d{4})/);
+      const pressureMatchINHG = metarString.match(/A(\d{4})/);
+      
+      if (pressureMatchQNH) {
+        parsed.pressure = pressureMatchQNH[1];
+        parsed.pressureUnit = 'hPa';
+      } else if (pressureMatchINHG) {
+        // 灏嗚嫳��告睘鏌辫浆鎹负鐧惧笗鏄剧ず锛屽悓鏃朵繚鐣欏師濮嬪₄1�7?        const inhgValue = parseInt(pressureMatchINHG[1]) / 100;
+        const hPaValue = Math.round(inhgValue * 33.8639);
+        parsed.pressure = `${hPaValue} (${inhgValue.toFixed(2)} INHG)`;
+        parsed.pressureUnit = 'INHG';
+      }
+
+      // 瑙ｆ瀽浜戦噺 - 鏢�硅繘浜戝眰浠ｇ爜瑙ｆ瀄1�7
+      const cloudRegex = /(FEW|SCT|BKN|OVC|NSC|SKC|CLR|VV)(\d{3})?/g;
+      let cloudMatch;
+      while ((cloudMatch = cloudRegex.exec(metarString)) !== null) {
+        if (cloudMatch[1] === 'NSC' || cloudMatch[1] === 'SKC' || cloudMatch[1] === 'CLR') {
+          // 鏃犱簯鎯呭喌
+          parsed.clouds.push({
+            type: cloudMatch[1],
+            height: '0'
+          });
+        } else {
+          parsed.clouds.push({
+            type: cloudMatch[1],
+            height: cloudMatch[2] ? (parseInt(cloudMatch[2]) * 100).toString() : '0'
+          });
+        }
+      }
+
+    } catch (error) {
+      console.error('METAR瑙ｆ瀽閿欒:', error);
+    }
+
+    return parsed;
+  }
+}
+
+// 椋庡垎閲忚绠楁湇鍔?class WindComponentCalculator {
+  // 璁＄畻璺戦亾椋庡垎閲?  static calculateWindComponents(windDirection: number, windSpeed: number, runwayHeading: number): { headwind: number; crosswind: number } {
+    const angleDiff = Math.abs(windDirection - runwayHeading);
+    const angleRad = (angleDiff * Math.PI) / 180;
+    
+    const headwind = Math.cos(angleRad) * windSpeed;
+    const crosswind = Math.sin(angleRad) * windSpeed;
+    
+    return {
+      headwind: Math.round(headwind * 10) / 10,
+      crosswind: Math.round(Math.abs(crosswind) * 10) / 10
+    };
+  }
+}
+
+// 椋炶瑙勫垯鍒ゅ畄1�7
+class FlightRulesCalculator {
+  static getFlightRules(parsedMETAR: ParsedMETAR): string {
+    const visibility = parseInt(parsedMETAR.visibility) || 9999;
+    const clouds = parsedMETAR.clouds;
+    
+    let ceiling = 9999;
+    for (const cloud of clouds) {
+      if (cloud.type === 'BKN' || cloud.type === 'OVC') {
+        const height = parseInt(cloud.height) || 9999;
+        if (height < ceiling) {
+          ceiling = height;
+        }
+      }
+    }
+
+    // VFR鏉��欢
+    if (visibility >= 5000 && ceiling >= 1000) {
+      return 'VFR';
+    }
+    // MVFR鏉��欢  
+    else if (visibility >= 1500 && ceiling >= 500) {
+      return 'MVFR';
+    }
+    // IFR鏉��欢
+    else if (visibility >= 800 && ceiling >= 200) {
+      return 'IFR';
+    }
+    // LIFR鏉��欢
+    else {
+      return 'LIFR';
+    }
+  }
+}
+
+// 鑾峰彇METAR鏁版嵁鐨勫嚱鏁板疄鐜?- 淇敼涓轰紭鍏堜娇鐢ㄤ富鏁版嵁婧?async function fetchMETARData(icao: string, config: Config): Promise<{ metar: string; taf: string }> {
+  let metar = '';
+  let taf = '';
+
+  // 浼樺厛浣跨敤涓绘暟鎹簮
+  const primarySource = API_SOURCES[config.primarySource];
+  const otherSources = Object.values(API_SOURCES).filter(source => source.name !== config.primarySource);
+
+  // 棣栧厛灏濊瘯涓绘暟鎹簮
+  if (primarySource) {
+    try {
+      if (config.consoleinfo) {
+        console.log(`浼樺厛浠庝富鏁版嵁婧?${primarySource.name} 鑾峰彄1�7 ${icao} 鐨凪ETAR鏁版嵁`);
+      }
+
+      const response = await axios.get(primarySource.metarUrl(icao), { timeout: 10000 });
+      
+      if (response.data) {
+        const parsed = primarySource.parseMetar(response.data);
+        if (parsed.metar) {
+          metar = parsed.metar;
+          taf = parsed.taf;
+          
+          // 濡傛灉鏈塗AF鏁版嵁锛屽皾璇曡幏鍙栧畬鏁寸殑TAF
+          if (!taf && primarySource.tafUrl) {
+            try {
+              const tafResponse = await axios.get(primarySource.tafUrl(icao), { timeout: 10000 });
+              if (tafResponse.data && primarySource.parseTaf) {
+                taf = primarySource.parseTaf(tafResponse.data);
+              }
+            } catch (tafError) {
+              if (config.consoleinfo) {
+                console.log(`浠庝富鏁版嵁婄1�7?${primarySource.name} 鑾峰彇TAF鏁版嵁澶辫触:`, tafError.message);
+              }
+            }
+          }
+
+          if (metar) {
+            if (config.consoleinfo) {
+              console.log(`鎴愬姛浠庝富鏁版嵁婧?${primarySource.name} 鑾峰彇METAR鏁版嵄1�7:`, metar);
+            }
+            return { metar, taf };
+          }
+        }
+      }
+    } catch (error) {
+      if (config.consoleinfo) {
+        console.log(`浠庝富鏁版嵁婄1�7?${primarySource.name} 鑾峰彇鏁版嵁澶辫规1�7:`, error.message);
+      }
+    }
+  }
+
+  // 涓绘暟鎹簮澶辫触锛屽皾璇曞叾浠栨暟鎹簄1�7
+  for (const source of otherSources) {
+    try {
+      if (config.consoleinfo) {
+        console.log(`灏濊瘯浠庡鐢ㄦ暟鎹簮 ${source.name} 鑾峰彄1�7 ${icao} 鐨凪ETAR鏁版嵁`);
+      }
+
+      const response = await axios.get(source.metarUrl(icao), { timeout: 10000 });
+      
+      if (response.data) {
+        const parsed = source.parseMetar(response.data);
+        if (parsed.metar) {
+          metar = parsed.metar;
+          taf = parsed.taf;
+          
+          // 濡傛灉鏈塗AF鏁版嵁锛屽皾璇曡幏鍙栧畬鏁寸殑TAF
+          if (!taf && source.tafUrl) {
+            try {
+              const tafResponse = await axios.get(source.tafUrl(icao), { timeout: 10000 });
+              if (tafResponse.data && source.parseTaf) {
+                taf = source.parseTaf(tafResponse.data);
+              }
+            } catch (tafError) {
+              if (config.consoleinfo) {
+                console.log(`浠庡鐢ㄦ暟鎹簄1�7 ${source.name} 鑾峰彇TAF鏁版嵁澶辫触:`, tafError.message);
+              }
+            }
+          }
+
+          if (metar) {
+            if (config.consoleinfo) {
+              console.log(`鎴愬姛浠庡鐢ㄦ暟鎹簮 ${source.name} 鑾峰彇METAR鏁版嵄1�7:`, metar);
+            }
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      if (config.consoleinfo) {
+        console.log(`浠庡鐢ㄦ暟鎹簄1�7 ${source.name} 鑾峰彇鏁版嵁澶辫规1�7:`, error.message);
+      }
+      continue;
+    }
+  }
+
+  return { metar, taf };
+}
+
+// 鏂囨湰杈撳嚭鏍煎紡鍖栫殑鍑芥暟��炵幄1�7
+function formatTextOutput(
+  icao: string,
+  metar: string,
+  taf: string,
+  parsedMETAR: ParsedMETAR,
+  airportInfo: AirportInfo,
+  flightRules: string,
+  sunTimes: SunTimes,
+  config: Config  // 娣诲姞config鍙傛暟鐢ㄤ簬缈昏瘄1�7
+): string {
+  const airportName = airportInfo ? `${airportInfo.cnName} (${airportInfo.enName})` : icao;
+  const elevation = airportInfo ? `${airportInfo.elevationFt} ft` : '鏈煄1�7';
+  
+  let output = `馃尋锄1�7?鏈哄溢� ${icao} 姘旇薄淇℃伅\n`;
+  output += `馃搷 ${airportName}\n`;
+  output += `馃搹 娴锋嫄1�7: ${elevation}\n\n`;
+  
+  output += `馃搳 椋炶瑙勫垯: ${getFlightRulesEmoji(flightRules)} ${flightRules}\n`;
+  output += `馃尅锄1�7?娓╁宄1�7: ${parsedMETAR.temperature || 'N/A'}掳C\n`;
+  output += `馃挧 闇茬偄1�7: ${parsedMETAR.dewpoint || 'N/A'}掳C\n`;
+  output += `馃搹 鑳��搄1�7? ${parsedMETAR.visibility || 'N/A'} 绫砛n`;
+  output += `馃挩 椋庡悄1�7: ${parsedMETAR.windDirection || 'N/A'}掄1�7 椋庨₄1�7? ${parsedMETAR.windSpeed || '0'} ${parsedMETAR.windUnit || 'KT'}\n`;
+  if (parsedMETAR.windGust) {
+    output += `馃挩 闃甸1�7: ${parsedMETAR.windGust} ${parsedMETAR.windUnit || 'KT'}\n`;
+  }
+  output += `馃搳 姘斿帄1�7: ${parsedMETAR.pressure || 'N/A'} ${ 'HPA'}\n\n`;
+  
+  // 浜戝眰淇℃伅 - 浣跨敤鏄犲皠琛ㄧ炕璇?  if (parsedMETAR.clouds.length > 0) {
+    output += `鈽侊笄1�7 浜戝眰淇℃伅:\n`;
+    parsedMETAR.clouds.forEach(cloud => {
+      const cloudDescription = config.cloudCoverageMap.find(item => item.code === cloud.type)?.description || cloud.type;
+      if (cloud.type === 'NSC' || cloud.type === 'SKC' || cloud.type === 'CLR') {
+        output += `   - ${cloudDescription}\n`;
+      } else {
+        output += `   - ${cloudDescription} ${cloud.height} ft\n`;
+      }
+    });
+  } else {
+    output += `鈽€锄1�7?鏃犳樉钁椾簯灞俓n`;
+  }
+  
+  // 澶╂皵鐜拌薄 - 浣跨敤鏄犲皠琛ㄧ炕璇?  if (parsedMETAR.weather.length > 0) {
+    const weatherDescriptions = parsedMETAR.weather.map(code => {
+      return config.weatherMap.find(item => item.code === code)?.description || code;
+    });
+    output += `馃對锄1�7?澶╂皵鐜拌薄: ${weatherDescriptions.join(', ')}\n`;
+  }
+  
+  // 鏃ュ嚭鏃ヨ惤鏃堕棄1�7
+  if (sunTimes) {
+    output += `\n馃寘 鏃ュ嚄1�7: ${sunTimes.sunrise} | 馃寚 鏃ヨ惄1�7: ${sunTimes.sunset}\n`;
+  }
+  
+  output += `\n馃摑 METAR: ${metar}\n`;
+  if (taf) {
+    output += `馃摑 TAF: ${taf}\n`;
+  }
+  
+  return output;
+}
+
+// 鑾峰彇椋炶瑙勫垯��瑰簲鐨勮��鎯呯鍄1�7?function getFlightRulesEmoji(flightRules: string): string {
+  switch (flightRules) {
+    case 'VFR': return '馃煝';
+    case 'MVFR': return '馃數';
+    case 'IFR': return '馃煛';
+    case 'LIFR': return '馃敶';
+    default: return '鈄1�7?;
+  }
+}
+
+export function apply(ctx: Context, config: Config) {
+  const command = ctx.command(`${config.commandname} <icao:string>`)
+    .alias(config.commandalias)
+    .action(async ({ session }, icao) => {
+      if (!icao) {
+        return '璇疯緭鍏ユ満鍦篒CAO浠ｇ爜锛屼緥濡傦細metar ZBAA';
+      }
+
+      if (!/^[A-Z]{4}$/.test(icao.toUpperCase())) {
+        return 'ICAO浠ｇ爜鏍煎紡閿欒锛屽簲涄1�7?涓ぇ鍐欏瓧姣嶏紝渚嬪锛歓BAA';
+      }
+
+      icao = icao.toUpperCase();
+
+      try {
+        // 鑾峰彇鏈哄満淇℃伄1�7
+        const airportInfo = await AirportService.getAirportInfo(icao);
+        
+        // 骞惰鑾峰彇鍏朵粬鏁版嵁
+        const [runways, metarData, sunTimes] = await Promise.all([
+          AirportService.getRunways(icao),
+          fetchMETARData(icao, config),
+          airportInfo ? SunTimeService.getSunTimes(airportInfo.latitudeDeg, airportInfo.longitudeDeg, config) : Promise.resolve(null)
+        ]);
+
+        if (!metarData.metar) {
+          return `鏃犳硶鑾峰彇 ${icao} 鐨凪ETAR鏁版嵁`;
+        }
+
+        // 瑙ｆ瀽METAR
+        const parsedMETAR = METARParser.parse(metarData.metar);
+        
+        // 璁＄畻椋庡垎閲忓拰椋炶瑙勫垄1�7
+        const windDirection = parseInt(parsedMETAR.windDirection) || 0;
+        const windSpeed = parseInt(parsedMETAR.windSpeed) || 0;
+        
+        // 璁＄畻鎵€鏈夎窇閬撶殑椋庡垎閲忓苟鎸夐€嗛鍒嗛噺鎺掑簭
+        let runwayWindComponents = runways.map(runway => {
+          const heading = parseInt(runway.leHeadingDegt) || 0;
+          return {
+            runway,
+            components: WindComponentCalculator.calculateWindComponents(windDirection, windSpeed, heading)
+          };
+        });
+
+        // 鎸夐€嗛鍒嗛噺浠庡ぇ鍒板皬鎺掑簭锛堥€嗛浼樺厛锛?        runwayWindComponents.sort((a, b) => b.components.headwind - a.components.headwind);
+
+        const flightRules = FlightRulesCalculator.getFlightRules(parsedMETAR);
+
+        // 淇鑹剧壒鐢ㄦ埛闂�1�7 - 浣跨敤姝ｇ��鐨勬牸寄1�7?        const userMention = session ? h('at', { id: session.userId }) : '';
+
+        // 鏍规嵁杈撳嚭妯��紡杩斿洖缁撴灉
+        if (config.outputMode === 'text') {
+          const textOutput = formatTextOutput(icao, metarData.metar, metarData.taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
+          return userMention ? [userMention, textOutput] : textOutput;
+        } else if (config.outputMode === 'image') {
+          const imageOutput = await generateImageOutput(
+            ctx, icao, metarData.metar, metarData.taf, parsedMETAR, 
+            airportInfo, runways, runwayWindComponents, flightRules, config, sunTimes
+          );
+          // 鍥剧墖妯″紡涓嬩篃瑕佽壘鐗圭敤鎴?          return userMention ? [userMention, imageOutput] : imageOutput;
+        } else {
+          const textOutput = formatTextOutput(icao, metarData.metar, metarData.taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
+          const imageOutput = await generateImageOutput(
+            ctx, icao, metarData.metar, metarData.taf, parsedMETAR,
+            airportInfo, runways, runwayWindComponents, flightRules, config, sunTimes
+          );
+          // 娣峰悎妯″紡涓嬩篃瑕佽壘鐗圭敤鎴?          return userMention ? [userMention, textOutput, imageOutput] : [textOutput, imageOutput];
+        }
+
+      } catch (error) {
+        if (config.consoleinfo) {
+          console.error('姘旇薄鏌ヨ閿欒1�7:', error);
+        }
+        return `鏌ヨ姘旇薄鏁版嵁鏃跺嚭鐜伴敊璇? ${error.message}`;
+      }
+    });
+
+  // 鍥剧墖杈撳嚭鐢熸垄1�7
+  async function generateImageOutput(
+    ctx: Context, 
+    icao: string, 
+    metar: string, 
+    taf: string, 
+    parsedMETAR: ParsedMETAR,
+    airportInfo: AirportInfo,
+    runways: RunwayInfo[],
+    runwayWindComponents: any[],
+    flightRules: string,
+    config: Config,
+    sunTimes: SunTimes
+  ) {
+    // 妫€鏄1�7?puppeteer 鏄惁鍙敤
+    if (!ctx.puppeteer) {
+      const textOutput = formatTextOutput(icao, metar, taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
+      return `鍥剧墖鐢熸垚鍔熻兘闇€瑕佸畨瑄1�7?puppeteer 鎻掍欢锛屼互涓嬫槸鏂囨湰鏍煎紡鐨勬皵璞��俊鎭細\n\n${textOutput}`;
+    }
+
+    try {
+      const page = await ctx.puppeteer.page();
+      
+      // 璁剧疆瑙嗗彛澶у皬浠ユ彁楂樻竻鏅板宄1�7
+      if (config.imageMode === 'manual') {
+        await page.setViewport({
+          width: config.imageWidth,
+          height: config.imageHeight,
+          deviceScaleFactor: 2
+        });
+      } else {
+        await page.setViewport({
+          width: 1920,
+          height: 1080,
+          deviceScaleFactor: 2
+        });
+      }
+
+      // 鍒涘缓鐜颁唬鍖栫殑HTML鍐呭1�7
+      const htmlContent = createModernWeatherHTML(
+        icao, metar, taf, parsedMETAR, airportInfo, 
+        runways, runwayWindComponents, flightRules, config, sunTimes
+      );
+
+      // 璁剧疆椤甸潰鍐呭1�7
+      await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+
+      // 鎴浘閫夐��1�7
+      const screenshotOptions: any = {
+        type: 'jpeg',
+        quality: config.screenshotquality,
+        encoding: 'binary'
+      };
+
+      // 璁剧疆鎴浘灏哄1�7
+      if (config.imageMode === 'manual') {
+        screenshotOptions.clip = {
+          x: 0,
+          y: 0,
+          width: config.imageWidth,
+          height: config.imageHeight
+        };
+      } else {
+        // 鑷姩妯″紡 - 鏍规嵁鍐呭璋冩暣澶у的1�7
+        const element = await page.$('.weather-container');
+        if (element) {
+          const boundingBox = await element.boundingBox();
+          if (boundingBox) {
+            screenshotOptions.clip = {
+              x: boundingBox.x,
+              y: boundingBox.y,
+              width: Math.ceil(boundingBox.width),
+              height: Math.ceil(boundingBox.height)
+            };
+          }
+        }
+      }
+
+      // 鎴浄1�7
+      const screenshot = await page.screenshot(screenshotOptions) as unknown as Buffer;
+
+      // 鍏抽棴椤甸潰锛堝鏋滃惎鐢ㄨ嚜鍔ㄥ叧闂約1�7
+      if (config.pageautoclose) {
+        await page.close();
+      }
+
+      return h.image(screenshot, 'image/jpeg');
+
+    } catch (error) {
+      if (config.consoleinfo) {
+        console.error('鍥剧墖鐢熸垚閿欒1�7:', error);
+      }
+      // 鍥剧墖鐢熸垚澶辫触鏃跺洖閫€鍒版枃鏈緭鍄1�7?      const textOutput = formatTextOutput(icao, metar, taf, parsedMETAR, airportInfo, flightRules, sunTimes, config);
+      return `鐢熸垚鍥剧墖鏃跺嚭鐜伴敊璇紝浠ヤ笅鏄枃鏈牸寮忕殑姘旇薄淇℃伅锛歕n\n${textOutput}`;
+    }
+  }
+
+  let cachedWindSvgDataUri: string | null | undefined;
+  function getWindSvgDataUri(): string | null {
+    if (cachedWindSvgDataUri !== undefined) return cachedWindSvgDataUri;
+
+    const candidates = [
+      path.join(__dirname, 'wind.svg'),
+      path.join(__dirname, '../src/wind.svg'),
+      path.join(__dirname, '../dist/wind.svg'),
+    ];
+
+    for (const filePath of candidates) {
+      try {
+        if (!fs.existsSync(filePath)) continue;
+        const svg = fs.readFileSync(filePath);
+        cachedWindSvgDataUri = `data:image/svg+xml;base64,${svg.toString('base64')}`;
+        return cachedWindSvgDataUri;
+      } catch {
+        // ignore and try next candidate
+      }
+    }
+
+    cachedWindSvgDataUri = null;
+    return cachedWindSvgDataUri;
+  }
+
+  function getWindCompassBackground(): string | null {
+    const dataUri = getWindSvgDataUri();
+    if (!dataUri) return null;
+    return `<image href="${dataUri}" xlink:href="${dataUri}" x="0" y="0" width="300" height="300" />`;
+  }
+
+  // 鍒涘缓鐜颁唬鍖栫殑澶╂皵淇℃伅HTML
+  function createModernWeatherHTML(
+    icao: string,
+    metar: string,
+    taf: string,
+    parsedMETAR: ParsedMETAR,
+    airportInfo: AirportInfo,
+    runways: RunwayInfo[],
+    runwayWindComponents: any[],
+    flightRules: string,
+    config: Config,
+    sunTimes: SunTimes
+  ): string {
+    const airportName = airportInfo ? airportInfo.cnName : `${icao} Airport`;
+    const windDirection = parseInt(parsedMETAR.windDirection) || 0;
+    const windSpeed = parseInt(parsedMETAR.windSpeed) || 0;
+    const temperature = parsedMETAR.temperature || 'N/A';
+    const dewpoint = parsedMETAR.dewpoint || 'N/A';
+    const pressure = parsedMETAR.pressure || 'N/A';
+    const visibility = parsedMETAR.visibility || 'N/A';
+    
+    // 璁＄畻鐩稿婢�垮害
+    const humidity = calculateHumidity(parseInt(temperature), parseInt(dewpoint));
+    
+    // 鑾峰彇褰撳墠鏃堕棄1�7
+    const now = new Date();
+    const localTime = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const localDate = now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+    
+    // 鐢熸垚璺戦亾閫夋嫨鍣?- 鎸夐€嗛浼樺厛鎺掑簄1�7
+    const runwaySelector = generateModernRunwaySelector(runways, runwayWindComponents);
+    
+    // 鐢熸垚浜戝眰淇℃伄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?    const cloudInfo = generateModernCloudInfo(parsedMETAR.clouds, config);
+    
+    // 鐢熸垚璺戦亾琛ㄦ牄1�7
+    const runwayTable = generateModernRunwayTable(runwayWindComponents);
+    
+    // 鐢熸垚鐜颁唬鍖栫殑缃楃洏 - 淇椋庡悜鏍囧繄1�7
+    const modernCompass = generateModernCompass(windDirection, windSpeed, runways, runwayWindComponents);
+    
+    // 鑾峰彇澶╂皵鍥炬爄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?    
+    // const weatherIcon = getModernWeatherIcon(parsedMETAR.weather, parsedMETAR.clouds, config);
+
+    return `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>METAR ${icao}</title>
+    <style>
+        ${getModernCSS()}
+    </style>
+</head>
+<body>
+    <div class="weather-container">
+        <!-- 椤堕儴��艰埄1�7 -->
+        <nav class="top-nav">
+            <div class="nav-breadcrumb">
+                <a href="javascript:void(0)">鍥藉1�7</a>
+                <span class="separator">鈄1�7?/span>
+                <a href="javascript:void(0)">${getFIRRegion(icao)}</a>
+                <span class="separator">鈄1�7?/span>
+                <a href="javascript:void(0)">${getFIRRegion(icao)} 椋炶鎯呮姤鍄1�7?/a>
+            </div>
+        </nav>
+
+        <!-- 鏍囬鍖哄煙 -->
+        <div class="header-section">
+            <div class="airport-title">
+                <h1>馃尋锄1�7?鏈哄溢� ${icao} 姘旇薄淇℃伅</h1>
+                <h2>${airportName}</h2>
+            </div>
+            <div class="time-info">
+                <div class="station-selector">
+                    <span class="station-name">${icao}</span>
+                </div>
+                <div class="local-time">
+                    <span class="date">${localDate}</span>
+                    ${localTime} LT
+                </div>
+                <div class="observation-time">
+                    <span class="time-ago">${getTimeAgo(parsedMETAR.time)}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 鎸囨爣鍗＄墖 -->
+        <div class="metrics-grid">
+            ${generateModernMetricCards(parsedMETAR, flightRules, humidity, config, sunTimes, weatherIcon)}
+        </div>
+
+        <div class="main-content">
+            <div class="left-column">
+                <!-- 缃楃洏鍖哄煙 -->
+                ${modernCompass}
+
+                <!-- 鏈哄溢�瑙傛祄1�7 -->
+                <div class="observation-section">
+                    <h2>鏈哄溢�瑙傛祄1�7</h2>
+                    <p>${generateModernObservationText(parsedMETAR, humidity, config)}</p>
+                </div>
+
+                <!-- 浜戝眰淇℃伅琛ㄦ牄1�7 -->
+                ${cloudInfo}
+
+                <!-- 璺戦亾閫夋嫨鍄1�7?-->
+                ${runwaySelector}
+            </div>
+            
+            <div class="right-column">
+                <!-- 浜戝眰鍓栭潰鍄1�7?-->
+                <div class="cloud-profile-section">
+                    <h2>浜戝眰鍓栭潰</h2>
+                    <div class="cloud-profile">
+                        ${generateModernCloudProfile(parsedMETAR.clouds, config)}
+                    </div>
+                </div>
+                
+                <!-- METAR鍘熷鏁版嵁 -->
+                <div class="raw-data-section">
+                    <code>METAR ${metar}</code>
+                    ${taf ? `<code class="taf-code">TAF ${taf}</code>` : ''}
+                </div>
+
+                <!-- 璺戦亾淇℃伅琛ㄦ牄1�7 -->
+                ${runwayTable}
+                
+                <!-- 娓╁害澶╂皵琛ㄦ牄1�7 -->
+                <div class="temperature-section">
+                    <h2>娓╁宄1�7 & 澶╂的1�7</h2>
+                    <table class="data-table">
+                        <tr>
+                            <td>娓╁宄1�7</td>
+                            <td>${temperature} 掳C</td>
+                        </tr>
+                        <tr>
+                            <td>闇茬偄1�7</td>
+                            <td>${dewpoint} 掳C</td>
+                        </tr>
+                        <tr>
+                            <td>鐩稿婀垮害</td>
+                            <td>${humidity}%</td>
+                        </tr>
+                        <tr>
+                            <td>姘斿帄1�7</td>
+                            <td>${pressure} ${parsedMETAR.pressureUnit || 'hPa'}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  // 鐢熸垚鐜颁唬鍖栫殑鎸囨爣鍗＄墄1�7
+  function generateModernMetricCards(parsedMETAR: ParsedMETAR, flightRules: string, humidity: string, config: Config, sunTimes: SunTimes, weatherIcon: string): string {
+    const temperature = parsedMETAR.temperature || 'N/A';
+    const windSpeed = parsedMETAR.windSpeed || '0';
+    const windDirection = parsedMETAR.windDirection || '0';
+    const visibility = parsedMETAR.visibility || 'N/A';
+    const pressure = parsedMETAR.pressure || 'N/A';
+    
+    // 椋炶瑙勫垯瀵瑰簲鐨凜SS绫诲拰鑳屾櫙棰滆壄1�7
+    const flightRuleClass = flightRules.toLowerCase();
+    const flightRuleColors = {
+      'vfr': { bg: 'rgba(40, 167, 69, 0.6)', color: '#28a745' },
+      'mvfr': { bg: 'rgba(23, 162, 184, 0.6)', color: '#17a2b8' },
+      'ifr': { bg: 'rgba(255, 193, 7, 0.6)', color: '#ffc107' },
+      'lifr': { bg: 'rgba(220, 53, 69, 0.6)', color: '#dc3545' }
+    };
+    
+    const flightRuleStyle = flightRuleColors[flightRuleClass] || flightRuleColors['vfr'];
+    
+    // 鑾峰彇澶╂皵鎻忚堄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?    const weatherDescription = getWeatherDescription(parsedMETAR.weather, config);
+
+    return `
+    <div class="metric-card">
+        <div class="metric-value" style="color: ${flightRuleStyle.color}">${flightRules}</div>
+        <div class="metric-header" style="background: ${flightRuleStyle.bg}">
+            <div class="metric-label">${getWarnings(parsedMETAR, config)}</div>
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="weather-metric">
+            <div class="weather-info">
+                <div class="metric-value">${temperature}掳C</div>
+                <div class="metric-label">${weatherDescription}</div>
+            </div>
+            <div class="weather-icon weather-icon-large">${weatherIcon}</div>
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-value">${windSpeed} kt</div>
+        <div class="metric-header" style="background: rgba(40, 167, 69, 0.6);">
+            <div class="metric-label">${windDirection}掄1�7</div>
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-value">${visibility}</div>
+        <div class="metric-header" style="background: rgba(40, 167, 69, 0.6);">
+            <div class="metric-label">鑳��搄1�7?/div>
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-value">${getCeiling(parsedMETAR.clouds)}</div>
+        <div class="metric-header" style="background: rgba(40, 167, 69, 0.6);">
+            <div class="metric-label">浜戝簳楂樺害</div>
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-value">${pressure}</div>
+        <div class="metric-header" style="background: rgba(42, 109, 161, 0.6);">
+            <div class="metric-label">${parsedMETAR.pressureUnit || '姘斿帄1�7'}</div>
+        </div>
+    </div>`;
+  }
+
+  // 淇敼CSS鏍峰紡浠ユ敮鎸佹柊鐨勫竷灞€ - 鍥哄畾璺戦亾鍜屼簯灞傚墫闈㈠ぇ灏?  function getModernCSS(): string {
+    return `
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: #0057a3;
+        color: #ffffff;
+        line-height: 1.6;
+    }
+
+    .weather-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    /* 椤堕儴��艰埄1�7 */
+    .top-nav {
+        margin-bottom: 20px;
+    }
+
+    .nav-breadcrumb {
+        display: flex;
+        align-items: center;
+        font-size: 14px;
+    }
+
+    .nav-breadcrumb a {
+        color: #ffffff;
+        text-decoration: none;
+        opacity: 0.8;
+        transition: opacity 0.2s;
+    }
+
+    .nav-breadcrumb a:hover {
+        opacity: 1;
+        text-decoration: underline;
+    }
+
+    .separator {
+        margin: 0 8px;
+        opacity: 0.6;
+    }
+
+    /* 鏍囬鍖哄煙 */
+    .header-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        flex-wrap: wrap;
+        gap: 20px;
+    }
+
+    .airport-title h1 {
+        font-size: 28px;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .airport-title h2 {
+        font-size: 18px;
+        font-weight: 400;
+        margin: 5px 0 0 0;
+        opacity: 0.8;
+    }
+
+    .time-info {
+        display: flex;
+        background: rgba(13, 58, 92, 0.8);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .station-selector,
+    .local-time,
+    .observation-time {
+        padding: 12px 20px;
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .station-selector:last-child,
+    .local-time:last-child,
+    .observation-time:last-child {
+        border-right: none;
+    }
+
+    .station-name {
+        font-weight: 600;
+    }
+
+    .local-time .date {
+        margin-right: 8px;
+        opacity: 0.8;
+    }
+
+    .observation-time {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    /* 鎸囨爣鍗＄墖缃戞牄1�7 */
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 30px;
+    }
+
+    .metric-card {
+        background: rgba(13, 58, 92, 0.8);
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        transition: transform 0.2s, background 0.2s;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 140px;
+    }
+
+    .metric-card:hover {
+        transform: translateY(-2px);
+        background: rgba(13, 58, 92, 1);
+    }
+
+    /* metric鍊煎湪涓婏紝header鍦ㄤ笄1�7 */
+    .metric-value {
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 8px;
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .metric-header {
+        background: rgba(42, 109, 161, 0.6);
+        margin: -20px -20px -20px -20px;
+        padding: 12px;
+        border-radius: 0 0 12px 12px;
+        margin-top: auto;
+    }
+
+    .metric-label {
+        font-size: 14px;
+        opacity: 0.9;
+    }
+
+    .weather-metric {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex: 1;
+    }
+
+    .weather-icon {
+        font-size: 40px;
+        margin-left: 15px;
+    }
+
+    .weather-info {
+        flex: 1;
+        text-align: left;
+    }
+
+    /* 涓昏鍐呭鍖哄煄1�7 */
+    .main-content {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+        margin-bottom: 30px;
+    }
+
+    /* 鏈哄溢�鏍囬1�7 */
+    .airport-header {
+        margin-bottom: 20px;
+    }
+
+    .airport-header h2 {
+        font-size: 22px;
+        font-weight: 600;
+        margin: 0;
+        color: #ffffff;
+    }
+
+    /* 缃楃洏鍜岄閫熸寚绀哄櫒甯冨眄1�7 - 鍥哄畾澶у的1�7 */
+    .compass-and-wind {
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+        height: 320px; /* 鍥哄畾楂樺害 */
+    }
+
+    .compass-section {
+        flex: 1;
+        min-width: 0;
+        height: 100%; /* 鍥哄畾楂樺害 */
+    }
+
+    .wind-speed-indicator {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin-top: 20px;
+        margin-left: -100px; /* 鍚戝乏绉诲姩100px */
+        height: 100%; /* 鍥哄畾楂樺害 */
+    }
+
+    /* 淇缃楃洏鏄剧ず涓嶅叏闂1�7 - 鍥哄畾澶у的1�7 */
+    .compass-container {
+        background: rgba(13, 58, 92, 0.8);
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 20px;
+        width: 100%;
+        height: 420px; /* 鍥哄畾楂樺害 */
+        box-sizing: border-box;
+    }
+
+    .compass-container h3 {
+        margin-bottom: 12px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #ffffff;
+        text-align: center;
+    }
+
+    .compass-wrapper {
+        position: relative;
+        width: 100%;
+        height: 250px; /* 鍥哄畾楂樺害 */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .compass-svg {
+        width: 100%;
+        height: 100%;
+        max-width: 250px; /* 鍥哄畾鏈€澶у搴?*/
+        max-height: 250px; /* 鍥哄畾鏈€澶ч珮搴?*/
+    }
+
+    .wind-info {
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding-top: 12px;
+        text-align: center;
+        margin-top: 10px;
+    }
+
+    /* 椋庨€熸寚绀哄櫒鏍峰約1�7 - 鍥哄畾澶у的1�7 */
+    .wind-speed-container {
+        width: 90%;
+        height: 250px; /* 鍥哄畾楂樺害 */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .wind-speed-container h4 {
+        margin-bottom: 12px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #ffffff;
+        text-align: center;
+    }
+
+    .wind-speed-gauge {
+        position: relative;
+        width: 100%;
+        height: 200px; /* 鍥哄畾楂樺害 */
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .wind-speed-dial {
+        width: 100%;
+        height: 100%;
+        max-width: 400px; /* 鍥哄畾鏈€澶у搴?*/
+    }
+
+    .wind-speed-pointer {
+        position: absolute;
+        top: 0;
+        left: 150px;
+        width: 100%;
+        height: 100%;
+        transform-origin: 80% 50%;
+        transition: transform 0.5s ease;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    /* 淇敼椋庨€熸寚閽堜綅缃?*/
+    .wind-pointer {
+        width: 80%;
+        right:200px;
+        height: 80%;
+        transform: translate(calc(-20% + 42px), 50px);
+}
+    }
+
+    .wind-speed-value {
+        text-align: center;
+        font-size: 14px;
+        color: #ffffff;
+        padding: 8px;
+        background: rgba(42, 109, 161, 0.3);
+        border-radius: 6px;
+        margin-top: 10px;
+    }
+
+    .wind-speed-value strong {
+        color: #4cb3a4;
+    }
+
+    /* 璺戦亾閫夋嫨鍄1�7?*/
+    .runway-selector {
+        display: flex;
+        gap: 15px;
+        overflow-x: auto;
+        padding: 10px 0;
+        margin-bottom: 20px;
+    }
+
+    .runway-option {
+        background: rgba(42, 109, 161, 0.6);
+        padding: 10px 12px;
+        border-radius: 8px;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background 0.2s;
+        border: 2px solid transparent;
+        min-width: 120px;
+        text-align: center;
+    }
+
+    .runway-option.active {
+        background: rgba(76, 179, 164, 0.8);
+        border-color: #4cb3a4;
+    }
+
+    .runway-option:hover {
+        background: rgba(42, 109, 161, 0.8);
+    }
+
+    /* 璺戦亾SVG鏍峰約1�7 */
+    .runway-svg {
+        width: 100%;
+        height: auto;
+        max-width: 200px;
+        margin: 5px 0;
+    }
+
+    /* 琛ㄦ牸鏍峰紡 */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+    }
+
+    .data-table td {
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .data-table td:first-child {
+        width: 40%;
+        background: rgba(42, 109, 161, 0.3);
+    }
+
+    /* 鍘熷鏁版嵁鍖哄煄1�7 */
+    .raw-data-section {
+        background: rgba(13, 58, 92, 0.8);
+        border-radius: 8px;
+        padding: 15px;
+        margin: 20px 0;
+    }
+
+    .raw-data-section code {
+        font-family: 'Courier New', monospace;
+        color: #ffffff;
+        display: block;
+        line-height: 1.4;
+    }
+
+    .taf-code {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* 浜戝眰鍓栭潰鍄1�7?- 鍥哄畾澶у的1�7 */
+    .cloud-profile-section {
+        margin: 20px 0;
+        height: 350px; /* 鍥哄畾楂樺害 */
+    }
+
+    .cloud-profile-section h2 {
+        margin-bottom: 15px;
+        font-size: 22px;
+        font-weight: 600;
+    }
+
+    .cloud-profile {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        padding: 20px;
+        height: 300px; /* 鍥哄畾楂樺害 */
+        position: relative;
+    }
+
+    .position-relative {
+        position: relative;
+    }
+
+    .w-100 {
+        width: 100%;
+    }
+
+    .h-100 {
+        height: 100%;
+    }
+
+    .left-top {
+        left: 0;
+        top: 0;
+    }
+
+    .position-absolute {
+        position: absolute;
+    }
+
+    .d-flex {
+        display: flex;
+    }
+
+    .small {
+        font-size: 12px;
+    }
+
+    .rounded {
+        border-radius: 8px;
+    }
+
+    .border {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .bg-primary {
+        background: rgba(42, 109, 161, 0.8);
+    }
+
+    .py-1 {
+        padding-top: 0.25rem;
+        padding-bottom: 0.25rem;
+    }
+
+    .px-2 {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+
+    .d-block {
+        display: block;
+    }
+
+    .m-auto {
+        margin: auto;
+    }
+
+    .text-center {
+        text-align: center;
+    }
+
+    .text-white {
+        color: white;
+    }
+
+    .mb-0 {
+        margin-bottom: 0;
+    }
+
+    .overflow-hidden {
+        overflow: hidden;
+    }
+
+    /* 瑙傛祴鍖哄煙 */
+    .observation-section {
+        margin-top: 20px;
+    }
+
+    .observation-section h2 {
+        margin-bottom: 15px;
+        font-size: 22px;
+        font-weight: 600;
+    }
+
+    .observation-section p {
+        line-height: 1.6;
+        opacity: 0.9;
+    }
+
+    /* 鍝嶅簲寮忚璄1�7?*/
+    @media (max-width: 768px) {
+        .main-content {
+            grid-template-columns: 1fr;
+        }
+        
+        .metrics-grid {
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        }
+        
+        .header-section {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .time-info {
+            width: 100%;
+            justify-content: space-between;
+        }
+        
+        .compass-and-wind {
+            flex-direction: column;
+            height: auto; /* 绉诲姩绔彇娑堝浐��氶珮搴?*/
+        }
+        
+        .compass-section,
+        .wind-speed-indicator {
+            width: 100%;
+            height: 300px; /* 绉诲姩绔浐瀹氶珮搴?*/
+        }
+        
+        .compass-wrapper {
+            height: 250px;
+        }
+        
+        .wind-speed-gauge {
+            height: 300px;
+        }
+        
+        .runway-selector {
+            flex-wrap: wrap;
+        }
+        
+        .runway-option {
+            min-width: 100px;
+        }
+        
+        /* 绉诲姩绔仮澶嶉閫熸寚绢�哄櫒浣嶇疄1�7 */
+        .wind-speed-indicator {
+            margin-left: 0;
+        }
+        
+        /* 绉诲姩绔簯灞傚墫闈㈠浘楂樺害璋冩暣 */
+        .cloud-profile-section {
+            height: 300px;
+        }
+        
+        .cloud-profile {
+            height: 250px;
+        }
+    }
+
+    /* 杈呭姪鏂囨湰 */
+    .help-text {
+        font-size: 12px;
+        opacity: 0.7;
+        margin-top: 5px;
+    }
+
+    /* 鐧藉ぉ鏃舵淇℃伄1�7 */
+    .daylight-info {
+        margin-top: 20px;
+    }
+
+    .daylight-info h2 {
+        margin-bottom: 15px;
+        font-size: 22px;
+        font-weight: 600;
+    }
+  `;
+  }
+
+  // 鐢熸垚鐜颁唬鍖栫殑缃楃洏缁勪欄1�7 - 鍥哄畾澶у的1�7
+  function generateModernCompass(windDirection: number, windSpeed: number, runways: RunwayInfo[], runwayWindComponents: any[]): string {
+    if (runways.length === 0) return '';
+    
+    // 浣跨敤閫嗛鍒嗛噺鏈€澶х殑璺戦亾浣滀负绀轰緥
+    const bestRunway = runwayWindComponents.length > 0 ? runwayWindComponents[0].runway : runways[0];
+    const heading = parseInt(bestRunway.leHeadingDegt) || 0;
+    
+    const windCompassBackground = getWindCompassBackground();
+    
+    return `
+    <div class="compass-container">
+        <h3>璺戦亄1�7 ${bestRunway.leIdent}/${bestRunway.heIdent} 椋庡悜绀烘剰鍄1�7?/h3>
+        <div class="compass-and-wind">
+            <div class="compass-section">
+                <div class="compass-wrapper">
+                    <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 300 300" class="compass-svg">
+                        <defs>
+                            <radialGradient id="compass_bg" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+                                <stop offset="0%" style="stop-color:rgb(240,240,240); stop-opacity:0.8"/>
+                                <stop offset="100%" style="stop-color:rgb(225,225,225); stop-opacity:0.9"/>
+                            </radialGradient>
+                        </defs>
+                        
+                        <!-- 鑳屾櫙鍦嗗拰鍒诲宄1�7 -->
+                        <circle cx="150" cy="150" r="145" fill="#2a6da1" stroke="#ffffff" stroke-width="2" opacity="0.8"/>
+                        <circle cx="150" cy="150" r="125" fill="#f7fafc" stroke="#e2e8f0" stroke-width="1" style="fill:url(#compass_bg)"/>
+                        ${windCompassBackground ?? ''}
+                        
+                        <!-- 鏂瑰悜鍒诲害 -->
+                        ${windCompassBackground ? '' : generateDirectionTicks()}
+                        
+                        <!-- 璺戦亾绾挎潯 - 浣跨敤涓巖unway-selector鐩稿悓鐨勬牸寄1�7?-->
+                        <g transform="rotate(${heading}, 150, 150)">
+                            <!-- 璺戦亾涓讳綋 -->
+                            <line x1="150" y1="40" x2="150" y2="260" 
+                                  style="stroke:#718096;stroke-width:20;stroke-linecap:round"/>
+                            <!-- 璺戦亾涓績组1�7?-->
+                            <line x1="150" y1="40" x2="150" y2="260" 
+                                  style="stroke:#cbd5e0;stroke-width:2;stroke-dasharray:10,5;stroke-linecap:round"/>
+                            <!-- 璺戦亾缂栧彿 -->
+                            <text x="150" y="30" text-anchor="middle" font-size="23" fill="#fff" font-weight="bold">${bestRunway.leIdent}</text>
+                            <text x="150" y="280" text-anchor="middle" font-size="23" fill="#fff" font-weight="bold">${bestRunway.heIdent}</text>
+                        </g>
+                        
+                        <!-- 椋庡悜绠ご - 淇鏃嬭浆涓縄1�7 -->
+                        <g transform="rotate(${windDirection}, 150, 150)">
+                            <line x1="150" y1="150" x2="150" y2="40" stroke="#e53e3e" stroke-width="3"/>
+                            <path d="M150 40 L145 30 L155 30 Z" fill="#e53e3e"/>
+                        </g>
+                        
+                        <!-- 涓績鐐?-->
+                        <circle cx="150" cy="150" r="3" fill="#e53e3e"/>
+                    </svg>
+                </div>
+                <div class="wind-info">
+                    <div style="display: inline-block; margin: 0 15px;">
+                        <span style="font-size: 11px; opacity: 0.8;">椋庡悄1�7</span>
+                        <div style="font-size: 14px; font-weight: 600;">${windDirection}掄1�7</div>
+                    </div>
+                    <div style="display: inline-block; margin: 0 15px;">
+                        <span style="font-size: 11px; opacity: 0.8;">椋庨₄1�7?/span>
+                        <div style="font-size: 14px; font-weight: 600;">${windSpeed} kt</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="wind-speed-indicator">
+                ${generateWindSpeedIndicator(windSpeed)}
+            </div>
+        </div>
+    </div>`;
+  }
+
+  // 鐢熸垚鏂瑰悜鍒诲宄1�7
+  function generateDirectionTicks(): string {
+    let directionTicks = '';
+    for (let i = 0; i < 36; i++) {
+      const tickAngle = (i * 10 * Math.PI) / 180;
+      const tickLength = i % 3 === 0 ? 8 : 4;
+      const tickX1 = 150 + Math.sin(tickAngle) * 125;
+      const tickY1 = 150 - Math.cos(tickAngle) * 125;
+      const tickX2 = 150 + Math.sin(tickAngle) * (125 + tickLength);
+      const tickY2 = 150 - Math.cos(tickAngle) * (125 + tickLength);
+      
+      directionTicks += `<line x1="${tickX1}" y1="${tickY1}" x2="${tickX2}" y2="${tickY2}" 
+                            stroke="#4a5568" stroke-width="${i % 3 === 0 ? 2 : 1}" />`;
+      
+      if (i % 3 === 0) {
+        const labelAngle = i * 10;
+        const labelX = 150 + Math.sin(tickAngle) * 110;
+        const labelY = 150 - Math.cos(tickAngle) * 110;
+        let labelText = '';
+        
+        if (labelAngle === 0) labelText = 'N';
+        else if (labelAngle === 90) labelText = 'E';
+        else if (labelAngle === 180) labelText = 'S';
+        else if (labelAngle === 270) labelText = 'W';
+        else labelText = (labelAngle / 10).toString();
+        
+        directionTicks += `<text x="${labelX}" y="${labelY}" font-size="10" text-anchor="middle" 
+                                fill="#ffffff" font-weight="bold">${labelText}</text>`;
+      }
+    }
+    return directionTicks;
+  }
+
+  // 鐢熸垚椋庨€熸寚绢�哄櫒
+  function generateWindSpeedIndicator(windSpeed: number): string {
+    // 璁＄畻鎸囬拡鏃嬭浆瑙掑害 (0-45kt瀵瑰簄1�70-270搄1�7?
+    const maxSpeed = 45;
+    const rotation = Math.min(windSpeed, maxSpeed) / maxSpeed * 270;
+    
+    return `
+    <div class="wind-speed-container">
+        <h4>椋庨€熸寚绀哄櫒</h4>
+        <div class="wind-speed-gauge">
+            <!-- 椋庨€熻〃鐩?-->
+            <svg xmlns="http://www.w3.org/2000/svg" enable-background="new" version="1.1" viewBox="0 0 539.97 299.99" class="wind-speed-dial"><path d="m470.76 1.2116 1.0566 12.189a137.28 137.28 0 0 1 0.0215-2e-3zm-25.641 4.5293 3.1289 11.711a137.28 137.28 0 0 1 0.0176-0.0078zm-24.469 8.9102 5.1504 11.059a137.28 137.28 0 0 1 0.0176-0.0059zm-22.547 13.021 7.0234 10.047a137.28 137.28 0 0 1 0.0176-0.01367zm-19.953 16.738 8.6406 8.6543a137.28 137.28 0 0 1 0.0137-0.01563zm-16.721 19.949 9.9141 6.9551a137.28 137.28 0 0 1 0.0117-0.02148zm-13.014 22.551 11.062 5.1699a137.28 137.28 0 0 1 0.01-0.01953zm-8.8965 24.473 11.842 3.1797a137.28 137.28 0 0 1 6e-3 -0.0215zm-4.5215 25.639 12.121 1.0684a137.28 137.28 0 0 1 2e-3 -0.0215zm12.188 24.959-12.188 1.0801 12.189-1.0566a137.28 137.28 0 0 1-2e-3 -0.0234zm4.0527 23.57-11.709 3.1523 11.715-3.1309a137.28 137.28 0 0 1-6e-3 -0.0215zm8.2656 22.449-11.049 5.168 11.061-5.1465a137.28 137.28 0 0 1-0.0117-0.0215zm11.998 20.672-10.031 7.041 10.043-7.0234a137.28 137.28 0 0 1-0.0117-0.0176zm15.34 18.328-8.6328 8.6562 8.6484-8.6426a137.28 137.28 0 0 1-0.0137-0.0137zm18.25 15.465-6.9356 9.9258 6.9551-9.916a137.28 137.28 0 0 1-0.0195-0.01zm20.762 11.869-5.1445 11.068 5.1641-11.059a137.28 137.28 0 0 1-0.0195-0.01zm22.48 8.127-3.1602 11.844 3.1797-11.842a137.28 137.28 0 0 1-0.0195-2e-3zm23.551 4.2363a137.28 137.28 0 0 1-0.0215 2e-3l-1.0469 12.123z" fill="#fffbfb" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-opacity=".19854"/><path d="m483.78 0.62566-0.0137 16.553a132.85 132.85 0 0 1 0.0312-2e-3zm-25.939 2.2734 2.877 16.379a132.85 132.85 0 0 1 0.0274-0.0039zm-25.15 6.7422 5.6953 15.684a132.85 132.85 0 0 1 0.0312-0.01172zm-23.598 11.01 8.3184 14.43a132.85 132.85 0 0 1 0.0293-0.01563zm-21.33 14.938 10.625 12.676a132.85 132.85 0 0 1 0.0215-0.01758zm-18.412 18.412 12.736 10.705a132.85 132.85 0 0 1 0.0176-0.02344zm-14.93 21.332 14.445 8.3516a132.85 132.85 0 0 1 0.0137-0.02539zm-10.982 23.598 15.594 5.6895a132.85 132.85 0 0 1 8e-3 -0.0293zm-6.7324 25.154 16.408 2.9023a132.85 132.85 0 0 1 6e-3 -0.0273zm14.271 25.92-16.551 0.0176 16.555 0.01a132.85 132.85 0 0 1-4e-3 -0.0273zm2.0879 23.045-16.371 2.9082 16.377-2.875a132.85 132.85 0 0 1-6e-3 -0.0332zm6.043 22.336-15.672 5.7207 15.684-5.6953a132.85 132.85 0 0 1-0.0117-0.0254zm9.752 20.973-14.414 8.3418 14.432-8.3184a132.85 132.85 0 0 1-0.0176-0.0234zm13.182 19.023-12.658 10.645 12.678-10.623a132.85 132.85 0 0 1-0.0195-0.0215zm16.436 16.295-10.682 12.756 10.701-12.736a132.85 132.85 0 0 1-0.0195-0.0195zm18.975 13.227-8.3262 14.459 8.3516-14.447a132.85 132.85 0 0 1-0.0254-0.0117zm20.936 9.8555-5.6621 15.605 5.6914-15.598a132.85 132.85 0 0 1-0.0293-8e-3zm22.365 5.9277-2.877 16.408 2.9062-16.402a132.85 132.85 0 0 1-0.0293-6e-3zm23.072 2.1211a132.85 132.85 0 0 1-0.0273 6e-3l0.0176 16.551z" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-opacity=".19731"/><g fill="#fff" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="0px" stroke-width="6.0619" word-spacing="0px"><g fill-opacity=".50458"><g font-size="32.33px"><text transform="rotate(-.85)" x="387.58875" y="112.16953" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="387.58875" y="112.16953" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" stroke-width="6.0619" text-align="center" text-anchor="middle">30</tspan></text><text transform="rotate(-.57)" x="393.76328" y="256.12094" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="393.76328" y="256.12094" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-4.196px" stroke-width="6.0619">10</tspan></text><text transform="rotate(-.63)" x="354.72375" y="186.40331" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="354.72375" y="186.40331" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-.94348px" stroke-width="6.0619">20</tspan></text><text transform="rotate(1.956)" x="429.66553" y="39.435848" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="429.66553" y="39.435848" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-1.6883px" stroke-width="6.0619">40</tspan></text><text transform="rotate(-.57)" x="471.66229" y="282.04977" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="471.66229" y="282.04977" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-4.196px" stroke-width="6.0619">0</tspan></text></g><g font-size="20.5px"><text transform="rotate(-.57)" x="434.14883" y="273.78049" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="434.14883" y="273.78049" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">5</tspan></text><text transform="rotate(-.57)" x="368.87915" y="223.67068" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="368.87915" y="223.67068" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">15</tspan></text><text transform="rotate(-.57)" x="356.20081" y="140.87766" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="356.20081" y="140.87766" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">25</tspan></text><text transform="rotate(-.57)" x="397.78909" y="71.381081" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="397.78909" y="71.381081" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">35</tspan></text><text transform="rotate(-.57)" x="474.15717" y="42.222847" enable-background="new" style="line-height:1.25" xml:space="preserve"><tspan x="474.15717" y="42.222847" fill="#ffffff" fill-opacity=".50458" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" letter-spacing="-2.6606px" stroke-width="6.0619">45</tspan></text></g></g><text transform="rotate(.49611)" x="513.96155" y="86.496727" enable-background="new" fill-opacity=".50087" font-size="25.105px" text-align="end" text-anchor="end" style="line-height:1.25" xml:space="preserve"><tspan x="494.27924" y="86.496727" fill="#ffffff" fill-opacity=".50087" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-weight="300" stroke-width="6.0619" text-align="end" text-anchor="end">kt</tspan></text></g></svg>
+            
+            <!-- 椋庨€熸寚閽?- 淇浣嶇疆闂锛屽皢鎸囬拡鍦嗙偣鍥哄畾鍦ㄥ彸渚т腑蹄1�7?-->
+            <div class="wind-speed-pointer" style="transform: rotate(${rotation}deg);">
+                <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" enable-background="new" version="1.1" viewBox="0 0 299.2 299.2" class="wind-pointer"><defs><filter id="filter2127" x="-.00055999" y="-.00052769" width="1.0179" height="1.0169" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/><feGaussianBlur in="composite1" result="blur" stdDeviation="0.0013910235"/><feOffset dx="0.1" dy="0.1" result="offset"/><feComposite in="SourceGraphic" in2="offset" result="composite2"/></filter><filter id="filter2115" x="-.1403" y="-.13221" width="1.3098" height="1.292" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="out" result="composite1"/><feGaussianBlur in="composite1" result="blur" stdDeviation="0.2"/><feOffset dx="0.1" dy="0.1" result="offset"/><feComposite in="offset" in2="SourceGraphic" operator="atop" result="composite2"/></filter><filter id="filter1350" x="-.21917" y="-.024537" width="1.4916" height="1.055" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/><feGaussianBlur in="composite1" result="blur" stdDeviation="1.2"/><feOffset dx="0.7" dy="0.7" result="offset"/><feComposite in="SourceGraphic" in2="offset" result="composite2"/></filter><filter id="filter1362" x="-.14724" y="-.061731" width="1.3303" height="1.1385" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(0,0,0)" flood-opacity=".49804" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="in" result="composite1"/><feGaussianBlur in="composite1" result="blur" stdDeviation="1.2"/><feOffset dx="0.7" dy="0.7" result="offset"/><feComposite in="SourceGraphic" in2="offset" result="composite2"/></filter></defs><path d="m143.07 147.7 0.15234 99.02 6.543 18.352 6.4453-18.385-0.13476-98.986z" fill="#fff" filter="url(#filter1350)"/><path d="m149.51 101.24a9.7799 9.7799 0 0 0-9.6699 9.7793 9.7799 9.7799 0 0 0 3.4219 7.4316v29.443h12.691l0.084-29.494a9.7799 9.7799 0 0 0 3.3633-7.3809 9.7799 9.7799 0 0 0-9.7793-9.7793 9.7799 9.7799 0 0 0-0.11133 0z" fill="#262626" filter="url(#filter1362)"/><text x="-247.21579" y="119.75312" fill="#ffffff" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="19.863px" font-weight="300" letter-spacing="0px" stroke-width="2.4828" word-spacing="0px" style="line-height:1.25" xml:space="preserve"><tspan x="-247.21579" y="138.13974" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="13.242px" font-weight="300" stroke-width="2.4828" style="line-height:0"/></text><g transform="translate(-446.92 140.23)" opacity=".99"><text x="13.86202" y="253.8631" fill="#000000" font-family="'-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif" font-size="5.3333px" font-weight="300" letter-spacing="0px" word-spacing="0px" style="line-height:1.25" xml:space="preserve"><tspan x="13.86202" y="258.80008"/></text></g><ellipse transform="matrix(-3.1841 .0099951 -.0099951 -3.1841 414.71 466.99)" cx="82.948" cy="99.94" rx="2.9808" ry="3.1633" enable-background="new" fill="#262626" filter="url(#filter2127)"/><ellipse transform="matrix(-3.1841 .0099951 -.0099951 -3.1841 414.71 466.99)" cx="82.948" cy="99.94" rx="1.7106" ry="1.8153" enable-background="new" fill="#262626" filter="url(#filter2115)"/></svg>
+            </div>
+        </div>
+        <div class="wind-speed-value">
+            褰撳墠椋庨€? <strong>${windSpeed} kt</strong>
+        </div>
+    </div>`;
+  }
+
+  // 鐢熸垚鐜颁唬鍖栫殑璺戦亾閫夋嫨鍣?- 鎸夐€嗛浼樺厛鎺掑簄1�7
+  function generateModernRunwaySelector(runways: RunwayInfo[], runwayWindComponents: any[]): string {
+    if (runways.length === 0) return '';
+    
+    return `
+      <div class="runway-selector">
+          ${runwayWindComponents.map((item, index) => {
+            const runway = item.runway;
+            const components = item.components;
+            const isActive = index === 0;
+            return `
+              <div class="runway-option ${isActive ? 'active' : ''}" data-index="${index}">
+                  <div class="runway-svg">
+                      ${generateRunaySVG(runway.leIdent, runway.heIdent)}
+                  </div>
+                  <div class="help-text">椤堕1�7: ${components.headwind.toFixed(1)} kt</div>
+                  <div class="help-text">渚ч: ${components.crosswind.toFixed(1)} kt</div>
+              </div>
+            `;
+          }).join('')}
+      </div>`;
+  }
+
+  // 璺戦亾SVG鐢熸垚鍑芥暟
+  function generateRunaySVG(leIdent: string, heIdent: string): string {
+    // 璺戦亾灏哄鍙傛暄1�7
+    const runwayLength = 480; // 璺戦亾闀垮害锛堝瀭鐩存柟鍚戯約1�7
+    const runwayWidth = 65;   // 璺戦亾��藉害锛堟按骞虫柟鍚戯級
+    const centerLineWidth = 4; // 涓績绾垮搄1�7?    const centerLineLength = 10; // 涓績绾挎瘡娈甸暱搴?    const centerLineGap = 8; // 涓績绾块棿闄1�7?    const thresholdLineWidth = 6; // 璺戦亾鍏ュ彛绾垮搴︼紙绔栫嚎锛?    const thresholdLineLength = 20; // 璺戦亾鍏ュ彛绾块暱搴?    const thresholdLineSpacing = 8; // 璺戦亾鍏ュ彛绾块棿璺?    const fontSize = 16; // 璺戦亾缂栧彿瀛椾綋澶у的1�7
+    
+    // SVG灏哄1�7
+    const svgWidth = 230;
+    const svgHeight = 530;
+    
+    // 璁＄畻灞呬腑浣嶇疄1�7
+    const centerX = svgWidth / 2 - 55;
+    const centerY = svgHeight / 2;
+    const runwayStartY = centerY - runwayLength / 2;
+    const runwayEndY = centerY + runwayLength / 2;
+    const runwayStartX = centerX - runwayWidth / 2 ;
+    const runwayEndX = centerX + runwayWidth / 2 ;
+    
+    return `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgWidth} ${svgHeight}" width="${svgWidth}" height="${svgHeight}">
+          <!-- 璺戦亾涓讳綋 -->
+          <rect x="${runwayStartX}" y="${runwayStartY}" 
+                width="${runwayWidth}" height="${runwayLength}" 
+                fill="#2a6da1" stroke="#fff" stroke-width="1"/>
+          
+          <!-- 璺戦亾涓績组1�7?-->
+          ${generateCenterLine(centerX, runwayStartY, runwayEndY -35, centerLineWidth, centerLineLength, centerLineGap)}
+          
+          <!-- 璺戦亾鍏ュ彛鏍囧織绾?- 椤堕儴锛堢珫绾匡約1�7 -->
+          ${generateThresholdLines(runwayStartX, runwayStartY, runwayWidth, thresholdLineWidth, thresholdLineLength, thresholdLineSpacing)}
+          
+          <!-- 璺戦亾鍏ュ彛鏍囧織绾?- 搴曢儴锛堢珫绾匡約1�7 -->
+          ${generateThresholdLines(runwayStartX, runwayEndY - thresholdLineLength, runwayWidth, thresholdLineWidth, thresholdLineLength, thresholdLineSpacing)}
+          
+          <!-- 璺戦亾缂栧彿 - 椤堕儴锛堝湪鍏ュ彛绾夸笂鏂癸約1�7 -->
+          <text x="${centerX}" y="${runwayStartY + 35}" 
+                text-anchor="middle" dominant-baseline="middle"
+                font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                font-size="${fontSize}" font-weight="600" fill="#fff">
+              ${leIdent}
+          </text>
+          
+          <!-- 璺戦亾缂栧彿 - 搴曢儴锛堝湪鍏ュ彛绾夸笂鏂癸約1�7 -->
+          <text x="${centerX}" y="${runwayEndY - 35}" 
+                text-anchor="middle" dominant-baseline="middle"
+                font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                font-size="${fontSize}" font-weight="600" fill="#fff">
+              ${heIdent}
+          </text>
+      </svg>`;
+  }
+
+  // 鐢熸垚璺戦亾涓績绾?  function generateCenterLine(centerX: number, startY: number, endY: number, lineWidth: number, lineLength: number, gap: number): string {
+    let lines = '';
+    let y = startY + gap + 35;
+    
+    while (y + lineLength < endY) {
+      lines += `<rect x="${centerX - lineWidth / 2}" y="${y}" 
+                     width="${lineWidth}" height="${lineLength}" fill="#fff"/>`;
+      y += lineLength + gap;
+    }
+    
+    return lines;
+  }
+
+  // 鐢熸垚璺戦亾鍏ュ彛鏍囧織绾匡紙绔栫嚎锄1�7?  function generateThresholdLines(startX: number, y: number, runwayWidth: number, lineWidth: number, lineLength: number, spacing: number): string {
+    let lines = '';
+    const lineCount = Math.floor(runwayWidth / (lineWidth + spacing));
+    const totalWidth = (lineWidth * lineCount) + (spacing * (lineCount - 1));
+    const startLineX = startX + (runwayWidth - totalWidth) / 2;
+    
+    for (let i = 0; i < lineCount; i++) {
+      const x = startLineX + i * (lineWidth + spacing);
+      lines += `<rect x="${x}" y="${y}" 
+                     width="${lineWidth}" height="${lineLength}" fill="#fff"/>`;
+    }
+    
+    return lines;
+  }
+
+  // 鐢熸垚鐜颁唬鍖栫殑浜戝眰鍓栭潰鍥?- 鍥哄畾澶у的1�7
+  function generateModernCloudProfile(clouds: any[], config: Config): string {
+    const cloudCondition = getCloudCondition(clouds, config);
+    
+    return `
+    <div class="w-100 position-relative" style="height: 250px;">
+        <svg class="w-100" viewBox="0 0 618 250" preserveAspectRatio="xMidYMid meet">
+            <path stroke="#fff" stroke-opacity=".3" stroke-width="1" d="M80,249 L617,249"></path>
+            <text font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif" style="font-size:18px;font-style:normal;font-variant:normal;font-weight:300;opacity:0.5;font-stretch:normal;text-anchor:end;text-align:end;fill:#ffffff;stroke-width:1" x="70" y="249">0 ft</text>
+            <path stroke="#fff" stroke-opacity=".3" stroke-width="1" d="M80,207.5 L617,207.5"></path>
+            <text font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif" style="font-size:18px;font-style:normal;font-variant:normal;font-weight:300;opacity:0.5;font-stretch:normal;text-anchor:end;text-align:end;fill:#ffffff;stroke-width:1" x="70" y="207.5">1,000 </text>
+            <path stroke="#fff" stroke-opacity=".3" stroke-width="1" d="M80,166 L617,166"></path>
+            <text font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif" style="font-size:18px;font-style:normal;font-variant:normal;font-weight:300;opacity:0.5;font-stretch:normal;text-anchor:end;text-align:end;fill:#ffffff;stroke-width:1" x="70" y="166">2,000 </text>
+            <path stroke="#fff" stroke-opacity=".3" stroke-width="1" d="M80,124.5 L617,124.5"></path>
+            <text font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif" style="font-size:18px;font-style:normal;font-variant:normal;font-weight:300;opacity:0.5;font-stretch:normal;text-anchor:end;text-align:end;fill:#ffffff;stroke-width:1" x="70" y="124.5">3,000 </text>
+            <path stroke="#fff" stroke-opacity=".3" stroke-width="1" d="M80,83 L617,83"></path>
+            <text font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif" style="font-size:18px;font-style:normal;font-variant:normal;font-weight:300;opacity:0.5;font-stretch:normal;text-anchor:end;text-align:end;fill:#ffffff;stroke-width:1" x="70" y="83">4,000 </text>
+            <path stroke="#fff" stroke-opacity=".3" stroke-width="1" d="M80,41.5 L617,41.5"></path>
+            <text font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif" style="font-size:18px;font-style:normal;font-variant:normal;font-weight:300;opacity:0.5;font-stretch:normal;text-anchor:end;text-align:end;fill:#ffffff;stroke-width:1" x="70" y="41.5">5,000 </text>
+            <path stroke="#fff" stroke-opacity=".3" d="M80,249 L80,10"></path>
+        </svg>
+        <div class="position-absolute left-top w-100 h-100 overflow-hidden">
+            <div class="position-absolute w-100 h-100 left-top d-flex" style="padding-left: 10%">
+                <div class="small rounded border bg-primary py-1 px-2 rounded d-block m-auto text-center" style="max-width: 75%">
+                    <h6 class="text-white mb-0">${cloudCondition}</h6>
+                </div>
+            </div>
+        </div>
+    </div>`;
+  }
+
+  // 鑾峰彇浜戝眰鐘舵€佹弿杩?- 浣跨敤鏄犲皠琛ㄧ炕璇?  function getCloudCondition(clouds: any[], config: Config): string {
+    if (clouds.length === 0) {
+      return config.cloudCoverageMap.find(item => item.code === 'NSC')?.description || "鏃犳樉钁椾簯灄1�7?;
+    }
+    
+    const hasOvercast = clouds.some(c => c.type === 'OVC');
+    const hasBroken = clouds.some(c => c.type === 'BKN');
+    const hasScattered = clouds.some(c => c.type === 'SCT');
+    const hasFew = clouds.some(c => c.type === 'FEW');
+    
+    if (hasOvercast) return config.cloudCoverageMap.find(item => item.code === 'OVC')?.description || "婊��ぉ浄1�7?;
+    if (hasBroken) return config.cloudCoverageMap.find(item => item.code === 'BKN')?.description || "澶氫簄1�7";
+    if (hasScattered) return config.cloudCoverageMap.find(item => item.code === 'SCT')?.description || "鐤忎簄1�7";
+    if (hasFew) return config.cloudCoverageMap.find(item => item.code === 'FEW')?.description || "灏戜簄1�7";
+    
+    return "鏈変簄1�7";
+  }
+
+  // 鐜颁唬鍖栫殑澶╂皵鍥炬爣鑾峰彄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function getModernWeatherIcon(weather: string[], clouds: any[], config: Config): string {
+    // 棣栧厛妫€鏌ユ槸鍚︽湁鐗规畩澶╂皵鐜拌薄
+    if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('闆锋毄1�7'))) {
+      return '鉢�堬笍';
+    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('闄1�7?))) {
+      return '馃導锄1�7?;
+    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('闄1�7?))) {
+      return '鉂勶笄1�7';
+    } else if (weather.some(w => config.weatherMap.find(item => item.code === w)?.description.includes('闄1�7?))) {
+      return '馃尗锄1�7?;
+    }
+    
+    // 鐒跺悗鏍规嵁浜戦噺鍐冲畾
+    if (clouds.some(c => c.type === 'OVC')) {
+      return '鈽侊笄1�7';
+    } else if (clouds.some(c => c.type === 'BKN')) {
+      return '馃尋锄1�7?;
+    } else if (clouds.some(c => c.type === 'SCT') || clouds.some(c => c.type === 'FEW')) {
+      return '鉢�?;
+    } else {
+      return '鈽€锄1�7?;
+    }
+  }
+
+  // 鐜颁唬鍖栫殑瑙傛祴鏂囨湰鐢熸垄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function generateModernObservationText(parsedMETAR: ParsedMETAR, humidity: string, config: Config): string {
+    const windText = parsedMETAR.windDirection === 'VRB' ? 
+      `椋庡悜澶氬彉锛岄閫?${parsedMETAR.windSpeed} ${parsedMETAR.windUnit}` :
+      `椋庡悄1�7 ${parsedMETAR.windDirection}掳锛岄閄1�7?${parsedMETAR.windSpeed} ${parsedMETAR.windUnit}`;
+    
+    // 缈昏瘧浜戝眰
+    const cloudDescriptions = parsedMETAR.clouds.map(cloud => {
+      const cloudDesc = config.cloudCoverageMap.find(item => item.code === cloud.type)?.description || cloud.type;
+      return `${cloudDesc} ${cloud.height}鑻卞昂`;
+    });
+    const cloudText = cloudDescriptions.length > 0 ? `浜戦噺锛?{cloudDescriptions.join('锄1�7?)}` : '鏃犳樉钁椾簯灄1�7?;
+
+    // 缈昏瘧澶╂皵鐜拌薄1�7
+    const weatherDescriptions = parsedMETAR.weather.map(code => {
+      return config.weatherMap.find(item => item.code === code)?.description || code;
+    });
+    const weatherText = weatherDescriptions.length > 0 ? `澶╂皵鐜拌薄锄1�7?{weatherDescriptions.join('锄1�7?)}` : '';
+
+    return `
+    椋庡悄1�7 ${windText}銄1�7?    鑳��搄1�7?${parsedMETAR.visibility} 绫炽₄1�7?    ${cloudText}銄1�7?    ${weatherText}
+    娓╁害鍜岄瀵掓寚鏁颁负 ${parsedMETAR.temperature} 掳C銄1�7?    闇茬偣娓╁害涄1�7?${parsedMETAR.dewpoint} 掳C锛岀浉��规箍搴︿负 ${humidity}%銄1�7?    娴峰钩闈㈡皵鍘嬩贄1�7 ${parsedMETAR.pressure} ${parsedMETAR.pressureUnit}銄1�7?  `.replace(/\s+/g, ' ').trim();
+  }
+
+  // 鐢熸垚鐜颁唬鍖栫殑浜戝眰淇℃伄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function generateModernCloudInfo(clouds: any[], config: Config): string {
+    if (clouds.length === 0) {
+      const noCloudDescription = config.cloudCoverageMap.find(item => item.code === 'NSC')?.description || '鏃犳樉钁椾簯灄1�7?;
+      return `
+      <div class="cloud-section">
+        <h2>浜戝眄1�7</h2>
+        <table class="data-table">
+            <tr>
+                <td>${noCloudDescription}</td>
+                <td>NSC</td>
+                <td>${noCloudDescription}</td>
+            </tr>
+        </table>
+      </div>`;
+    }
+    
+    return `
+    <div class="cloud-section">
+        <h2>浜戝眄1�7</h2>
+        <table class="data-table">
+            ${clouds.map(cloud => {
+              const description = config.cloudCoverageMap.find(item => item.code === cloud.type)?.description || cloud.type;
+              return `
+                <tr>
+                    <td>${cloud.height} ft</td>
+                    <td>${cloud.type}</td>
+                    <td>${description}</td>
+                </tr>
+              `;
+            }).join('')}
+        </table>
+    </div>`;
+  }
+
+  // 鐢熸垚鐜颁唬鍖栫殑璺戦亾琛ㄦ牄1�7
+  function generateModernRunwayTable(runwayWindComponents: any[]): string {
+    if (runwayWindComponents.length === 0) return '';
+    
+    return `
+    <div class="runway-section">
+        <h2>璺戦亄1�7</h2>
+        <div style="overflow-x: auto;">
+            <table class="data-table">
+                <tr>
+                    <td><strong>缂栧彄1�7</strong></td>
+                    <td><strong>鑸悄1�7</strong></td>
+                    <td><strong>渚ч</strong></td>
+                    <td><strong>椤堕1�7</strong></td>
+                    <td><strong>渚ч鐧惧垎姣?/strong></td>
+                </tr>
+                ${runwayWindComponents.map(item => {
+                  const runway = item.runway;
+                  const components = item.components;
+                  const crosswindPercent = Math.round((components.crosswind / (parseInt(components.headwind) || 1)) * 100);
+                  
+                  return `
+                    <tr>
+                        <td><strong>${runway.leIdent}/${runway.heIdent}</strong></td>
+                        <td>${runway.leHeadingDegt}掄1�7-${runway.heHeadingDegt}掄1�7</td>
+                        <td>${components.crosswind.toFixed(1)} kt</td>
+                        <td>${components.headwind.toFixed(1)} kt</td>
+                        <td>${crosswindPercent}%</td>
+                    </tr>
+                  `;
+                }).join('')}
+            </table>
+        </div>
+        <p class="help-text">鎸夐€嗛鍒嗛噺鎺掑簭锛屾渶澶ч��椋庡垎閲忕殑璺戦亾宸查珮浜樉绢�猴紝鐢ㄤ簬渚ч璁＄畻銄1�7?/p>
+    </div>`;
+  }
+
+  // 鑾峰彇澶╂皵鎻忚堄1�7 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function getWeatherDescription(weather: string[], config: Config): string {
+    if (weather.length === 0) return '鏅存湄1�7';
+    const descriptions = weather.map(code => {
+      const found = config.weatherMap.find(item => item.code === code);
+      return found ? found.description : code;
+    });
+    return descriptions.join('锄1�7?) || '澶╂皵鑹ソ';
+  }
+
+  // 鑾峰彇璀﹢�憡淇℃伅 - 浣跨敤鏄犲皠琛ㄧ炕璇?  function getWarnings(parsedMETAR: ParsedMETAR, config: Config): string {
+    const warningWeather = parsedMETAR.weather.filter(w => {
+      const description = config.weatherMap.find(item => item.code === w)?.description || '';
+      return description.includes('闆锋毄1�7') || description.includes('椋庢毄1�7') || description.includes('椋戠嚄1�7');
+    });
+    
+    if (warningWeather.length > 0) {
+      const warningDescriptions = warningWeather.map(code => {
+        return config.weatherMap.find(item => item.code === code)?.description || code;
+      });
+      return `鏈夊ぉ姘旇鍄1�7? ${warningDescriptions.join(', ')}`;
+    }
+    return '鏃犺鍛?;
+  }
+
+  // 杈呭姪鍑芥暟
+  function calculateHumidity(temp: number, dewpoint: number): string {
+    if (isNaN(temp) || isNaN(dewpoint)) return 'N/A';
+    const rh = 100 * (Math.exp((17.625 * dewpoint) / (243.04 + dewpoint)) / 
+                      Math.exp((17.625 * temp) / (243.04 + temp)));
+    return Math.round(rh).toString();
+  }
+
+  function getFIRRegion(icao: string): string {
+    if (icao.startsWith('ZL')) return '鍏板窞鎯呮姤鍄1�7?;
+    if (icao.startsWith('ZG')) return '骞垮窞鎯呮姤鍄1�7?;
+    if (icao.startsWith('ZS')) return '涓婃捣鎯呮姤鍄1�7?;
+    return 'Unknown';
+  }
+  
+
+  function getTimeAgo(observationTime: string): string {
+    if (!observationTime) return '鏈煄1�7';
+    return '鍒氬垄1�7';
+  }
+
+  function getCeiling(clouds: any[]): string {
+    const ceilingCloud = clouds.find(c => c.type === 'BKN' || c.type === 'OVC');
+    return ceilingCloud ? ceilingCloud.height : 'None';
+  }
+}
