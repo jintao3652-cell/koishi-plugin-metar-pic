@@ -78,7 +78,9 @@ export interface Config {
   consoleinfo: boolean;
   pageautoclose: boolean;
   apihub_token: string;
-  primarySource: 'xflysim' | 'etops' | 'xbzglw' | 'aviationweather' | 'metar-taf' | 'nmc' | 'china-airport' | 'hko' | 'smg';
+  primarySource: 'xflysim' | 'etops' | 'xbzglw' | 'aviationweather' | 'metar-taf' | 'nmc' | 'china-airport' | 'hko' | 'smg' | 'vatsim-radar';
+  enableVatsimRadar: boolean;
+  vatsimRadarUserAgent: string;
 }
 
 export const Config = Schema.intersect([
@@ -125,8 +127,14 @@ export const Config = Schema.intersect([
       Schema.const('china-airport').description('中国机场气象集合'),
       Schema.const('hko').description('香港天文台（仅 VHHH）'),
       Schema.const('smg').description('澳门地球物理气象局（仅 VMMC）'),
+      Schema.const('vatsim-radar').description('VATSIM-Radar（METAR + TAF）'),
     ]).default('xflysim').description('首选气象数据源'),
   }).description('数据源设置'),
+
+  Schema.object({
+    enableVatsimRadar: Schema.boolean().default(true).description('启用 VATSIM-Radar 数据源（同一接口同时返回 METAR 与 TAF）'),
+    vatsimRadarUserAgent: Schema.string().default('').description('抓取 VATSIM-Radar 用的 User-Agent（留空则用浏览器自身 UA 去掉 Headless 标记）'),
+  }).description('VATSIM-Radar 设置'),
 
   Schema.object({
     weatherMap: Schema.array(Schema.object({
@@ -1041,7 +1049,203 @@ async function getChinaAirportWeather(request: (url: string) => Promise<any>): P
   return chinaAirportWeatherRequest;
 }
 
-async function fetchMETARData(icao: string, config: Config): Promise<{ metar: string; taf: string }> {
+/* ==================== VATSIM-Radar 数据源 ====================
+ * 接口：https://vatsim-radar.com/api/data/vatsim/airport/{icao}/metar
+ * 返回：{ "metar": "...", "taf": "..." }，同一个响应里同时给出 METAR 与 TAF；
+ *       其中 metar 字段不带 "METAR " 前缀（解析链路两种写法都兼容）。
+ *
+ * 注意：该站整站套了 Cloudflare 人机验证，普通 HTTP 客户端大概率 403，
+ *       因此直连失败时改用无头浏览器抓取（复用 Koishi 的 puppeteer 服务）。
+ */
+
+/** 反自动化检测补丁：必须自包含（会被序列化后注入到页面） */
+function vatsimRadarAntiDetect() {
+  Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+  const w = window as any;
+  w.chrome = w.chrome || { runtime: {} };
+  const perms = navigator.permissions as any;
+  if (perms && perms.query) {
+    const original = perms.query.bind(perms);
+    perms.query = (p: any) => (p && p.name === 'notifications' ? Promise.resolve({ state: 'denied' }) : original(p));
+  }
+}
+
+interface BrowserProbe {
+  ok: boolean;
+  status: number;
+  text?: string;
+  doc?: string;
+}
+
+function looksLikeJson(value: string): boolean {
+  const text = (value || '').trim();
+  return (text.startsWith('[') || text.startsWith('{')) && text.length > 1;
+}
+
+/** 用无头浏览器充当 HTTP 客户端，用于穿透 Cloudflare 之类的人机验证 */
+class BrowserJsonClient {
+  constructor(
+    private puppeteer: any,
+    private timeout = 45000,
+    private log: (...args: any[]) => void = () => {},
+    private userAgent = '',
+  ) {}
+
+  get available(): boolean {
+    return !!this.puppeteer && typeof this.puppeteer.page === 'function';
+  }
+
+  /**
+   * 由浏览器真实 UA 派生出可用 UA：去掉 `Headless` 标记。
+   * 无头模式原生 UA 形如 `... HeadlessChrome/155.0.0.0 ... Edg/155.0.0.0`，
+   * 这个 `Headless` 字样会被 Cloudflare 直接判定为机器人；派生方案能保持品牌与版本号
+   * 跟 `Sec-CH-UA` 客户端提示一致，指纹更自洽。配置了自定义 UA 时以配置为准。
+   */
+  private async applyUserAgent(page: any): Promise<string> {
+    if (this.userAgent) {
+      await page.setUserAgent(this.userAgent);
+      return this.userAgent;
+    }
+    const native: string = await page.evaluate(() => navigator.userAgent).catch(() => '');
+    const ua = String(native || '').replace(/Headless/gi, '');
+    if (ua) await page.setUserAgent(ua);
+    return ua;
+  }
+
+  /** 用浏览器访问 url 并解析返回的 JSON */
+  async getJson(url: string): Promise<any> {
+    if (!this.available) throw new Error('未安装或未启用 puppeteer 服务');
+
+    let page: any;
+    try {
+      page = await this.puppeteer.page();
+      await page.evaluateOnNewDocument(vatsimRadarAntiDetect);
+      await this.applyUserAgent(page);
+      await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: this.timeout });
+      return await this.waitForJson(page, url);
+    } finally {
+      if (page) { try { await page.close(); } catch { /* 忽略关闭异常 */ } }
+    }
+  }
+
+  /** 轮询直到拿到合法 JSON（期间 Cloudflare 挑战会在后台自动通过） */
+  private async waitForJson(page: any, url: string): Promise<any> {
+    const deadline = Date.now() + this.timeout;
+    let last = '等待页面加载';
+    let round = 0;
+
+    while (Date.now() < deadline) {
+      round++;
+      const probe: BrowserProbe = await page.evaluate(async (target: string) => {
+        try {
+          const response = await fetch(target, {
+            headers: { Accept: 'application/json, text/plain, */*' },
+            credentials: 'include',
+            cache: 'no-store',
+          });
+          if (response.ok) return { ok: true, status: response.status, text: await response.text() };
+          return { ok: false, status: response.status, doc: response.status === 403 ? '' : await response.text() };
+        } catch (error: any) {
+          // 挑战页的 CSP（default-src 'none'）会拦掉 fetch，此时退回读文档内容
+          const doc = (document.body && (document.body.textContent || '')) || '';
+          return { ok: false, status: 0, doc };
+        }
+      }, url).catch((error: any) => ({ ok: false, status: -1, doc: String(error?.message || error) } as BrowserProbe));
+
+      if (probe.ok && looksLikeJson(probe.text || '')) return JSON.parse(probe.text as string);
+      if (probe.ok) last = '返回内容不是合法 JSON';
+      else if (probe.doc && looksLikeJson(probe.doc)) return JSON.parse(probe.doc);
+      else if (probe.status === -1) last = `页面异常：${probe.doc}`;
+      else if (probe.status === 403) last = 'Cloudflare 人机验证未通过（403）';
+      else if (probe.status) last = `HTTP ${probe.status}`;
+      else last = '仍在人机验证页';
+
+      if (round === 1) this.log(`VATSIM-Radar 首次未就绪（${last}），等待人机验证放行…`);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+
+    throw new Error(`浏览器抓取失败：${last}`);
+  }
+}
+
+function parseVatsimRadarWeather(data: unknown): { metar: string; taf: string } {
+  if (!isRecord(data)) return { metar: '', taf: '' };
+  return {
+    // 该接口的 metar 字段不带 "METAR " 前缀，交给统一链路处理即可（解析与展示都对两种写法兼容）
+    metar: normalizeReport(data.metar ?? data.METAR ?? ''),
+    taf: normalizeReport(data.taf ?? data.TAF ?? ''),
+  };
+}
+
+/** 报文半小时更新一次，做个短缓存避免每次都开无头浏览器 */
+const VATSIM_RADAR_CACHE_TTL = 2 * 60 * 1000;
+const vatsimRadarCache = new Map<string, { expiresAt: number; data: { metar: string; taf: string } }>();
+
+async function fetchVatsimRadarWeather(
+  icao: string,
+  config: Config,
+  puppeteer?: any,
+): Promise<{ metar: string; taf: string }> {
+  const empty = { metar: '', taf: '' };
+  if (!config.enableVatsimRadar) return empty;
+
+  const cached = vatsimRadarCache.get(icao);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+
+  const url = `https://vatsim-radar.com/api/data/vatsim/airport/${encodeURIComponent(icao)}/metar`;
+  let parsed = empty;
+
+  // 1) 先试直连：Cloudflare 挑战是按 IP 信誉下发的，放行时可省掉一次无头浏览器开销
+  try {
+    const response = await axios.get(url, {
+      timeout: 8000,
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Referer: 'https://vatsim-radar.com/',
+        Origin: 'https://vatsim-radar.com',
+        'User-Agent': config.vatsimRadarUserAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      },
+    });
+    parsed = parseVatsimRadarWeather(response.data);
+  } catch (error) {
+    if (config.consoleinfo) {
+      console.log(`VATSIM-Radar 直连失败，改用无头浏览器：${getErrorMessage(error)}`);
+    }
+  }
+
+  // 2) 无头浏览器兜底（穿透 Cloudflare 人机验证）
+  if (!parsed.metar && !parsed.taf) {
+    const client = new BrowserJsonClient(
+      puppeteer,
+      45000,
+      config.consoleinfo ? (...args: any[]) => console.log(...args) : () => {},
+      config.vatsimRadarUserAgent,
+    );
+    if (!client.available) {
+      if (config.consoleinfo) console.log('VATSIM-Radar 需要 puppeteer 服务，当前不可用，跳过该数据源');
+      return empty;
+    }
+    try {
+      parsed = parseVatsimRadarWeather(await client.getJson(url));
+      if (config.consoleinfo) console.log(`VATSIM-Radar 浏览器抓取成功：${parsed.metar}`);
+    } catch (error) {
+      if (config.consoleinfo) console.log(`VATSIM-Radar 浏览器抓取失败：${getErrorMessage(error)}`);
+      return empty;
+    }
+  }
+
+  // 空结果不缓存，避免一次偶发失败把该机场锁死两分钟
+  if (parsed.metar || parsed.taf) {
+    vatsimRadarCache.set(icao, { expiresAt: Date.now() + VATSIM_RADAR_CACHE_TTL, data: parsed });
+  }
+  return parsed;
+}
+
+async function fetchMETARData(icao: string, config: Config, puppeteer?: any): Promise<{ metar: string; taf: string }> {
   const request = async (url: string) => {
     try {
       const response = await axios.get(url, {
@@ -1058,7 +1262,7 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
     }
   };
   const isMainlandStation = icao.startsWith('Z') && icao !== 'VHHH' && icao !== 'VMMC';
-  const [aviationMetar, aviationTaf, metarTaf, legacy, nmcMetarData, nmcTafData, chinaAirportData, hkoData, smgMetarData, smgTafData] = await Promise.all([
+  const [aviationMetar, aviationTaf, metarTaf, legacy, nmcMetarData, nmcTafData, chinaAirportData, hkoData, smgMetarData, smgTafData, vatsimRadarData] = await Promise.all([
     request(`https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(icao)}&hours=0&format=json`),
     request(`https://aviationweather.gov/api/data/taf?ids=${encodeURIComponent(icao)}&format=json`),
     request(`https://metar-taf.com/site/preview-airport?id=${encodeURIComponent(icao)}&nightmode=false`),
@@ -1069,6 +1273,7 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
     icao === 'VHHH' ? request('https://www.hko.gov.hk/aviat/metar_chi_revamp.json') : null,
     icao === 'VMMC' ? request('https://frame.smg.gov.mo/metar/c_metar.php') : null,
     icao === 'VMMC' ? request('https://frame.smg.gov.mo/taf/c_taf.php') : null,
+    fetchVatsimRadarWeather(icao, config, puppeteer),
   ]);
   const chinaAirportObservation = Array.isArray(chinaAirportData)
     ? chinaAirportData.find(item => String(item?.AirTermin_ID || '').toUpperCase() === icao)
@@ -1084,6 +1289,7 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
     selectNewestReport([chinaAirportMetar], icao, 'METAR', 'china-airport'),
     selectNewestReport(collectRawFields(hkoData, 'METAR'), icao, 'METAR', 'hko'),
     selectNewestReport(collectRawFields(smgMetarData, 'METAR'), icao, 'METAR', 'smg'),
+    selectNewestReport([vatsimRadarData.metar], icao, 'METAR', 'vatsim-radar'),
   ].filter((candidate): candidate is ReportCandidate => Boolean(candidate));
   const tafCandidates = [
     selectNewestReport(collectRawFields(aviationTaf, 'TAF'), icao, 'TAF', 'aviationweather'),
@@ -1091,6 +1297,7 @@ async function fetchMETARData(icao: string, config: Config): Promise<{ metar: st
     selectNewestReport([legacy.taf], icao, 'TAF', legacy.tafSource || 'legacy'),
     selectNewestReport([nmcTaf], icao, 'TAF', 'nmc'),
     selectNewestReport(collectRawFields(smgTafData, 'TAF'), icao, 'TAF', 'smg'),
+    selectNewestReport([vatsimRadarData.taf], icao, 'TAF', 'vatsim-radar'),
   ].filter((candidate): candidate is ReportCandidate => Boolean(candidate));
   // 时间相同时使用控制台配置的首选源作为决胜条件；时间不同始终选更新的报文。
   const compareCandidates = (left: ReportCandidate, right: ReportCandidate) =>
@@ -1203,7 +1410,7 @@ export function apply(ctx: Context, config: Config) {
         // 并行获取其他数据
         const [runways, metarData, sunTimes] = await Promise.all([
           AirportService.getRunways(icao),
-          fetchMETARData(icao, config),
+          fetchMETARData(icao, config, ctx.puppeteer),
           airportInfo ? SunTimeService.getSunTimes(airportInfo.latitudeDeg, airportInfo.longitudeDeg, config) : Promise.resolve(null)
         ]);
 

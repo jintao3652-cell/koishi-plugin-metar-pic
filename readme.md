@@ -15,7 +15,7 @@
   - 跑道顶风/侧风分量表格（顶风端高亮、顺风端置灰）
   - 云层剖面（按云量/高度使用 `cloud.svg` 渲染）
   - 原始 METAR/TAF 报文
-- 多数据源：支持 `xflysim` / `etops` / `xbzglw`，可配置主数据源并自动切换备用
+- 多数据源：支持 `xflysim` / `etops` / `xbzglw` / `aviationweather` / `metar-taf` / `nmc` / `china-airport` / `hko` / `smg` / `vatsim-radar`，多源并行取最新报文，可配置首选数据源
 - 映射表：天气现象与云量代码可自定义中文描述
 
 ## 安装
@@ -98,13 +98,34 @@ metar ZBAA
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---:|---|
-| `primarySource` | `xflysim \| etops \| xbzglw` | `xflysim` | 首选气象数据源（失败时自动尝试备用） |
+| `primarySource` | `xflysim \| etops \| xbzglw \| aviationweather \| metar-taf \| nmc \| china-airport \| hko \| smg \| vatsim-radar` | `xflysim` | 首选气象数据源（多个源并行查询，取报文时间最新的一个；时间相同时优先取此源） |
 
 数据源大致差异（以实际接口返回为准）：
 
 - `xflysim`：支持 METAR，TAF 通过 forecast 接口获取
 - `etops`：支持 METAR/TAF（分接口）
 - `xbzglw`：按文本行解析 METAR/TAF（可用性依赖站点）
+- `vatsim-radar`：同一接口同时返回 METAR 与 TAF（见下节）
+
+### VATSIM-Radar 设置
+
+数据来自 `https://vatsim-radar.com/api/data/vatsim/airport/{icao}/metar`，**同一个响应里同时包含 METAR 和 TAF**。
+
+该站整站套了 Cloudflare 人机验证，普通 HTTP 客户端直连大概率返回 403，因此抓取策略是：
+
+1. 先尝试直连（若你的出口 IP 未被 Cloudflare 挑战，则直接成功，开销最小）；
+2. 直连失败时用无头浏览器抓取，复用 Koishi 的 `puppeteer` 服务穿透人机验证。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---:|---|
+| `enableVatsimRadar` | boolean | `true` | 是否启用该数据源（需 `koishi-plugin-puppeteer` 已启用） |
+| `vatsimRadarUserAgent` | string | 空 | 抓取时使用的 UA；留空则由浏览器自身 UA 派生（去掉 `Headless` 标记） |
+
+说明：
+
+- 该源是"多源并行 + 取最新"链路里的一员，不会因为你没选它作为 `primarySource` 就完全不请求——把 `enableVatsimRadar` 关掉才会跳过。
+- 报文半小时更新一次，插件对该源做了 **2 分钟缓存**，避免每次查询都开一次浏览器；失败结果不缓存。
+- 无头浏览器首次抓取约需 1.5 秒左右（挑战通过后同一浏览器实例会复用 `cf_clearance`）。
 
 ### API 设置（日出日落）
 
@@ -160,11 +181,15 @@ metar ZBAA
 
 在配置里切换 `primarySource`：
 
-- `xflysim` / `etops` / `xbzglw`
+- `xflysim` / `etops` / `xbzglw` / `aviationweather` / `metar-taf` / `nmc` / `china-airport` / `hko` / `smg` / `vatsim-radar`
 
 并可打开 `consoleinfo` 查看具体失败原因（超时/接口变更/网络问题等）。
 
-### 3) 云层剖面/天气中文不符合你的习惯
+### 3) VATSIM-Radar 抓取失败
+
+该源需要 `koishi-plugin-puppeteer` 已启用；日志里会打印是直连失败还是浏览器抓取失败（如"Cloudflare 人机验证未通过（403）"）。若你的网络环境不适合无头浏览器抓取，把 `enableVatsimRadar` 关闭即可。
+
+### 4) 云层剖面/天气中文不符合你的习惯
 
 直接在配置里编辑 `weatherMap` 与 `cloudCoverageMap`。
 
